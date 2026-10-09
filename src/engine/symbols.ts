@@ -7,10 +7,18 @@ export const ROWS = 4;
 
 export const WAYS_SYMBOLS = ['lion', 'elephant', 'bull', 'deer', 'zebra', 'A', 'K', 'Q', 'J', '10', '9'] as const;
 export const SCATTER = 'coin';
+/** Substitutes for every ways symbol (not the scatter). Pays nothing by itself. */
+export const WILD = 'wild';
+/** Wild only appears on reels 2, 3 and 4. */
+export const WILD_REELS: readonly number[] = [1, 2, 3];
 
 export type WaysSymbol = (typeof WAYS_SYMBOLS)[number];
-export type SymbolId = WaysSymbol | typeof SCATTER;
-export const ALL_SYMBOLS: readonly SymbolId[] = [...WAYS_SYMBOLS, SCATTER];
+export type SymbolId = WaysSymbol | typeof SCATTER | typeof WILD;
+export const ALL_SYMBOLS: readonly SymbolId[] = [...WAYS_SYMBOLS, SCATTER, WILD];
+
+/** This many scatters anywhere award FREE_SPINS_AWARD free spins (also during free spins). */
+export const FREE_SPINS_TRIGGER = 3;
+export const FREE_SPINS_AWARD = 8;
 
 /** grid[reel][row], row 0 is the top of the window. */
 export type Grid = SymbolId[][];
@@ -24,17 +32,17 @@ export const BET_MULTIPLIER = 50;
 export const ALLOWED_BETS = [50, 100, 250, 500] as const;
 
 export const WAYS_PAYTABLE: Record<WaysSymbol, Record<3 | 4 | 5, number>> = {
-  lion: { 3: 100, 4: 300, 5: 1250 },
-  elephant: { 3: 80, 4: 250, 5: 1000 },
-  bull: { 3: 60, 4: 200, 5: 750 },
-  deer: { 3: 50, 4: 150, 5: 500 },
-  zebra: { 3: 50, 4: 125, 5: 500 },
-  A: { 3: 30, 4: 80, 5: 250 },
-  K: { 3: 30, 4: 80, 5: 250 },
-  Q: { 3: 25, 4: 60, 5: 200 },
-  J: { 3: 25, 4: 60, 5: 200 },
-  '10': { 3: 20, 4: 50, 5: 150 },
-  '9': { 3: 20, 4: 50, 5: 150 },
+  lion: { 3: 60, 4: 180, 5: 750 },
+  elephant: { 3: 50, 4: 150, 5: 600 },
+  bull: { 3: 40, 4: 120, 5: 450 },
+  deer: { 3: 30, 4: 90, 5: 300 },
+  zebra: { 3: 30, 4: 75, 5: 300 },
+  A: { 3: 20, 4: 50, 5: 150 },
+  K: { 3: 20, 4: 50, 5: 150 },
+  Q: { 3: 15, 4: 35, 5: 120 },
+  J: { 3: 15, 4: 35, 5: 120 },
+  '10': { 3: 12, 4: 30, 5: 90 },
+  '9': { 3: 12, 4: 30, 5: 90 },
 };
 
 /** Scatter pays anywhere on the grid, as a multiple of the total bet. 5+ pays the 5 prize. */

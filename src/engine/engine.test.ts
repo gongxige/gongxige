@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ALLOWED_BETS, BET_MULTIPLIER, REEL_STRIPS, ROWS, WAYS_PAYTABLE, computeRtp, evaluate, gridFromStops, spin, windowAt, type Grid, type SymbolId } from './index.ts';
+import { ALLOWED_BETS, BET_MULTIPLIER, FREE_SPINS_AWARD, REEL_STRIPS, ROWS, WAYS_PAYTABLE, WILD_REELS, computeRtp, evaluate, gridFromStops, playRound, spin, windowAt, type Grid, type SymbolId } from './index.ts';
 
 /** Write grids the way they look on screen (one string per row), get grid[reel][row]. */
 function grid(...rows: string[]): Grid {
@@ -84,6 +84,43 @@ describe('evaluate', () => {
     assert.equal(result.payout, (WAYS_PAYTABLE.A[3] + WAYS_PAYTABLE.K[3]) * unit);
   });
 
+  it('wilds on reels 2–4 stand in for the symbol and add to the ways', () => {
+    const result = evaluate(grid(
+      'lion  wild  A     Q  9',
+      'K     lion  wild  J  10',
+      'A     K     lion  9  10',
+      'Q     J     K     10 9',
+    ), bet);
+    const lion = result.wins.find((w) => w.symbol === 'lion');
+    assert.ok(lion && lion.kind === 'ways');
+    assert.equal(lion.ways, 2 * 2); // reel 2: lion + wild, reel 3: lion + wild
+    assert.equal(lion.payout, WAYS_PAYTABLE.lion[3] * 4 * unit);
+    assert.ok(lion.cells.some((c) => c.reel === 1 && c.row === 0), 'the wild cell is part of the win');
+  });
+
+  it('a wild on reel 1 or 5 does not substitute, and wilds never count as scatters', () => {
+    assert.deepEqual(WILD_REELS, [1, 2, 3]);
+    const result = evaluate(grid(
+      'wild  zebra zebra 9    A',
+      'K     coin  wild  J    10',
+      'A     K     coin  wild 10',
+      'Q     J     K     10   9',
+    ), bet);
+    assert.equal(result.wins.find((w) => w.symbol === 'zebra'), undefined, 'reel 1 has no real zebra');
+    assert.equal(result.freeSpinsAwarded, 0, 'two coins plus wilds is not a trigger');
+  });
+
+  it('three or more scatters award free spins', () => {
+    const three = evaluate(grid(
+      'coin  A     K     Q     J',
+      'A     K     coin  J     10',
+      'K     Q     J     10    coin',
+      'Q     J     10    9     A',
+    ), bet);
+    assert.equal(three.freeSpinsAwarded, FREE_SPINS_AWARD);
+    assert.equal(FREE_SPINS_AWARD, 8);
+  });
+
   it('rejects bets that are not a multiple of the bet multiplier', () => {
     assert.throws(() => evaluate(grid('A A A A A', 'A A A A A', 'A A A A A', 'A A A A A'), BET_MULTIPLIER + 1));
   });
@@ -133,7 +170,14 @@ describe('rtp', () => {
     assert.ok(total > 0.94 && total < 0.97, `RTP was ${total}`);
   });
 
-  it('a seeded simulation agrees with the exact calculation', () => {
+  it('free spins add to the return, and retriggers keep it finite', () => {
+    const rtp = computeRtp();
+    assert.ok(rtp.freeSpins > 0 && rtp.freeSpins < rtp.perSpin);
+    assert.ok(rtp.freeSpinsPerTrigger >= FREE_SPINS_AWARD);
+    assert.ok(Math.abs(rtp.total - (rtp.perSpin + rtp.freeSpins)) < 1e-12);
+  });
+
+  it('a seeded simulation (free spins included) agrees with the exact calculation', () => {
     let a = 42; // mulberry32
     const randomInt = (max: number) => {
       a = (a + 0x6d2b79f5) >>> 0;
@@ -141,10 +185,10 @@ describe('rtp', () => {
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4294967296) * max);
     };
-    const spins = 200_000;
+    const rounds = 200_000;
     let paid = 0;
-    for (let i = 0; i < spins; i += 1) paid += spin(BET_MULTIPLIER, randomInt).payout;
-    const simulated = paid / (BET_MULTIPLIER * spins);
+    for (let i = 0; i < rounds; i += 1) paid += playRound(BET_MULTIPLIER, randomInt).payout;
+    const simulated = paid / (BET_MULTIPLIER * rounds);
     assert.ok(Math.abs(simulated - computeRtp().total) < 0.03, `simulated ${simulated}`);
   });
 });

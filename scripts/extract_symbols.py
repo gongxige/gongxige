@@ -33,6 +33,9 @@ BOARD_BOTTOM = BOARD_Y + 4 * CELL_H
 #             below them, and this trims those neighbours off.
 #   margin_x  horizontal margin beyond the cell (default MARGIN_X).
 #   thin      remove lines up to this many px wide (stray separator lines).
+#   rect      (left, top, right, bottom) in px relative to the cell's top-left:
+#             cut this rectangle as-is, no keying (the wild is a framed card);
+#             brightness comes from the cream of `cream_cell` (row, col).
 SOURCES = {
     "Q": (30, 0, 0, {}),
     "K": (250, 1, 1, {}),
@@ -46,6 +49,7 @@ SOURCES = {
     "bull": (30, 1, 1, {"thin": 2}),
     "zebra": (135, 2, 1, {"ellipse": (96, 60)}),
     "coin": (135, 2, 4, {"ellipse": (99, 84), "margin_x": 2}),
+    "wild": (640, 0, 2, {"rect": (-2, -1, 181, 109), "cream_cell": (0, 0)}),
 }
 
 # Medallions spill above and below their cell, so look this far beyond it
@@ -60,7 +64,27 @@ CANVAS = (202, 171)
 CREAM_TARGET = np.array([246, 238, 196], dtype=float)
 
 
-def cut_symbol(frame: Image.Image, row: int, col: int, ellipse: tuple[int, int] | None = None, margin_x: int = MARGIN_X, thin: int = 0) -> Image.Image:
+def cream_of(frame: Image.Image, row: int, col: int) -> np.ndarray:
+    """Cream background colour of a cell: median of its brightest border pixels."""
+    x0, y0 = BOARD_X + col * CELL_W, BOARD_Y + row * CELL_H
+    rgb = np.asarray(frame.convert("RGB").crop((int(x0 + 8), int(y0 + 4), int(x0 + CELL_W - 8), int(y0 + CELL_H - 4)))).astype(float)
+    border = np.concatenate([rgb[:4].reshape(-1, 3), rgb[-4:].reshape(-1, 3), rgb[:, :4].reshape(-1, 3), rgb[:, -4:].reshape(-1, 3)])
+    lum = border.mean(axis=1)
+    return np.median(border[lum >= np.percentile(lum, 70)], axis=0)
+
+
+def cut_rect(frame: Image.Image, row: int, col: int, rect: tuple[int, int, int, int], cream_cell: tuple[int, int]) -> Image.Image:
+    x0, y0 = BOARD_X + col * CELL_W, BOARD_Y + row * CELL_H
+    rgb = np.asarray(frame.convert("RGB").crop((int(x0 + rect[0]), int(y0 + rect[1]), int(x0 + rect[2]), int(y0 + rect[3])))).astype(float)
+    # The card covers its whole cell, so take the brightness reference from a
+    # letter cell in the same frame.
+    bright = np.clip(rgb * (CREAM_TARGET / cream_of(frame, *cream_cell)), 0, 255).astype(np.uint8)
+    return Image.fromarray(bright).convert("RGBA")
+
+
+def cut_symbol(frame: Image.Image, row: int, col: int, ellipse: tuple[int, int] | None = None, margin_x: int = MARGIN_X, thin: int = 0, rect: tuple[int, int, int, int] | None = None, cream_cell: tuple[int, int] = (0, 0)) -> Image.Image:
+    if rect:
+        return cut_rect(frame, row, col, rect, cream_cell)
     x0 = BOARD_X + col * CELL_W - margin_x
     y0 = BOARD_Y + row * CELL_H - MARGIN_Y
     box = (int(x0), int(max(y0, BOARD_Y)), int(x0 + CELL_W + 2 * margin_x), int(min(y0 + CELL_H + 2 * MARGIN_Y, BOARD_BOTTOM)))
@@ -146,9 +170,11 @@ def main() -> None:
 
     if args.review:
         cell = (260, 160)
-        sheet = Image.new("RGB", (cell[0] * 4, cell[1] * 3), (241, 230, 176))
+        columns = 5
+        rows = -(-len(results) // columns)
+        sheet = Image.new("RGB", (cell[0] * columns, cell[1] * rows), (241, 230, 176))
         for n, image in enumerate(results.values()):
-            x, y = (n % 4) * cell[0], (n // 4) * cell[1]
+            x, y = (n % columns) * cell[0], (n // columns) * cell[1]
             sheet.paste(image, (x + (cell[0] - image.width) // 2, y + (cell[1] - image.height) // 2), image)
         sheet.save(args.review)
 
