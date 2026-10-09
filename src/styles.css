@@ -1,0 +1,47 @@
+:root { background: #000; color: #fff; font-family: system-ui, sans-serif; font-synthesis: none; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+body { min-width: 320px; overflow: hidden; background: #000; }
+button { font: inherit; }
+
+.game-shell { display: flex; min-height: 100dvh; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px 0; background: #000; }
+.reference-stage { position: relative; width: min(100vw, calc(100dvh * 16 / 9)); aspect-ratio: 16 / 9; overflow: hidden; background: #000; }
+.chrome-image { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
+
+/* Measured from the supplied 1280×720 video: the wood frame stays in the base,
+   while this layer owns the five independent moving reel tracks. */
+.reel-board { position: absolute; left: 11.35%; top: 20.15%; width: 78.55%; height: 63.45%; display: grid; grid-template-columns: repeat(5, 1fr); overflow: hidden; background: #efe4aa; }
+.reel-column { position: relative; min-width: 0; overflow: hidden; border-right: 2px solid rgba(114, 66, 11, .45); background: #eee3a4; }
+.reel-column:first-child { border-left: 1px solid rgba(114, 66, 11, .45); }
+.reel-track { width: 100%; will-change: transform; }
+.reel-symbol { width: 100%; height: calc(100% / var(--track-length, 16)); display: grid; place-items: center; overflow: hidden; background: #efe4aa; }
+.reel-symbol img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
+.reel-column.is-spinning .reel-symbol img { filter: blur(2.4px) saturate(1.08) brightness(1.08); }
+.reel-column.is-spinning::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #ffffff44, transparent 18%, transparent 74%, #7b430033); animation: reel-sheen .16s linear infinite; }
+.reel-symbol.is-winning { position: relative; z-index: 2; box-shadow: inset 0 0 0 3px #70f5ff, inset 0 0 18px #0ddfff, 0 0 13px #0ddfff; animation: win-pulse .42s ease-in-out infinite alternate; }
+.reel-symbol.is-winning::after { content: ''; position: absolute; inset: 3px; border: 2px solid #c8ffff; border-radius: 4px; pointer-events: none; animation: win-border .5s ease-in-out infinite alternate; }
+.reel-symbol.is-winning.is-cleared img { opacity: 0; transition: opacity .18s ease-out; }
+.reel-symbol.is-winning.is-cleared { background: #efe4aa; }
+@keyframes reel-sheen { from { transform: translateY(-16%); } to { transform: translateY(16%); } }
+@keyframes win-pulse { from { filter: brightness(1); } to { filter: brightness(1.28); } }
+@keyframes win-border { from { opacity: .55; } to { opacity: 1; } }
+
+.result-overlay { position: absolute; left: 37%; bottom: 2.6%; width: 26%; height: 7.4%; display: grid; place-items: center; color: #ffd84d; font: 700 clamp(14px, 2.3vw, 30px) Georgia, serif; text-shadow: 0 0 7px #ff7f00, 0 2px 2px #40001e; pointer-events: none; }
+.reference-stage.has-win .result-overlay { animation: result-flash .42s ease-in-out infinite alternate; }
+@keyframes result-flash { from { opacity: .55; transform: scale(.95); } to { opacity: 1; transform: scale(1.08); } }
+
+.coin-effect { position: absolute; left: 70.6%; top: 40%; width: 14.5%; height: 25%; object-fit: contain; z-index: 4; pointer-events: none; filter: drop-shadow(0 0 9px #ffd34c); animation: coin-pop .72s cubic-bezier(.18,.8,.2,1) both, coin-shine .4s ease-in-out .1s infinite alternate; }
+@keyframes coin-pop { 0% { opacity: 0; transform: scale(.35) rotate(-18deg); } 55% { opacity: 1; transform: scale(1.14) rotate(5deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
+@keyframes coin-shine { from { filter: brightness(1) drop-shadow(0 0 7px #ffb300); } to { filter: brightness(1.32) drop-shadow(0 0 18px #fff1a2); } }
+
+.spin-result-fx { position: absolute; right: .45%; bottom: 1.1%; width: 15.4%; height: 10.5%; z-index: 3; display: grid; place-items: center; border: 3px solid #caff9c; border-radius: 18px; background: linear-gradient(180deg, #9cf45b, #3da91c 58%, #1d7310); box-shadow: inset 0 2px 0 #eaffcb, 0 0 9px #73ff38; color: #f5ffe9; font: 700 clamp(12px, 1.9vw, 24px) system-ui, sans-serif; text-shadow: 0 2px 2px #1c6412, 0 0 6px #fff; opacity: 0; transform: scale(.92); pointer-events: none; }
+.spin-result-fx.is-visible { opacity: .88; transform: scale(1); animation: green-button-pulse .65s ease-in-out infinite alternate; }
+@keyframes green-button-pulse { from { filter: brightness(.96); } to { filter: brightness(1.16); } }
+
+.spin-hitbox { position: absolute; right: .45%; bottom: 1.1%; width: 15.4%; height: 10.5%; z-index: 5; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.spin-hitbox:disabled { cursor: default; }
+.spin-hitbox:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+
+@media (max-aspect-ratio: 4 / 3) { .reference-stage { flex: none; } }
+/* Local demo controls; the reel visuals remain defined below. */
+.demo-toolbar,.demo-controls{display:flex;gap:12px;align-items:center;justify-content:center;color:#fff;font:600 14px/1.2 system-ui,sans-serif;margin:0;position:relative;z-index:4}.demo-toolbar button,.demo-controls button,.demo-controls select{border:1px solid #e6c76c;border-radius:7px;background:#291048;color:#fff;padding:7px 10px;font:inherit}.demo-controls button{background:#b92842}.spin-summary,.demo-message{color:#fff0a8;text-align:center;font:600 13px system-ui,sans-serif;position:relative;z-index:5;margin:0}.spin-summary{color:#dfffb2}.admin-backdrop{position:fixed;inset:0;background:#13051ccc;display:grid;place-items:center;z-index:50;font-family:system-ui,sans-serif}.admin-card{width:min(390px,calc(100vw - 40px));display:grid;gap:14px;background:#2b124a;border:1px solid #f0d870;border-radius:14px;padding:22px;color:#fff;box-shadow:0 16px 60px #000}.admin-card h2{margin:0}.admin-card p{margin:0;color:#e4d5ef;font-size:13px}.admin-card label{display:grid;gap:6px;font-size:14px}.admin-card input{padding:9px;border-radius:7px;border:1px solid #a17abb}.admin-card div{display:flex;justify-content:flex-end;gap:8px}.admin-card button{padding:8px 12px;border:0;border-radius:7px;background:#f0d870;color:#35104f;font-weight:700}

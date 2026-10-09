@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 本机测试服运行时数据（余额、旋转记录），每台机器各自生成
+data/
+
+# 参考素材体积大（视频拆帧、截图、旧版 HTML），只保留在本机，不进仓库
+reference/
+.video-tools/
