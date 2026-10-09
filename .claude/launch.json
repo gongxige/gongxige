@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "api-check", "runtimeExecutable": "node", "runtimeArgs": ["server.mjs"], "port": 8797, "env": { "API_PORT": "8797" } },
+    { "name": "web-check", "runtimeExecutable": "npx", "runtimeArgs": ["vite"], "port": 4183, "env": { "API_PORT": "8797", "WEB_PORT": "4183" } }
+  ]
+}

@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { ALLOWED_BETS, ROWS, type SymbolId, type Win } from './engine/index.ts';
 
-type SymbolId = 'Q' | 'K' | '10' | 'J' | '9' | 'A' | 'elephant' | 'bull' | 'deer' | 'lion' | 'coin' | 'zebra';
-type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxPayoutMultiplier: number; mode: string; updatedAt: string | null };
-type SpinResult = { grid: SymbolId[][]; winningCells: string[]; payout: number; multiplier: number; credits: number };
+type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
+type SpinResult = { grid: SymbolId[][]; wins: Win[]; winningCells: string[]; payout: number; capped: boolean; credits: number };
 
-const ROWS = 4;
 const STOP_TIMES = [800, 1260, 1800, 2260, 2800];
 const WIN_START_TIME = 3200;
 const initialColumns: SymbolId[][] = [['Q', 'elephant', 'deer', 'lion'], ['Q', 'bull', 'J', 'A'], ['K', '10', '10', '10'], ['10', 'J', 'A', 'coin'], ['lion', 'K', 'lion', '10']];
@@ -22,9 +21,9 @@ export default function App() {
   const [displayWin, setDisplayWin] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [credits, setCredits] = useState(1000);
+  const [credits, setCredits] = useState(0);
   const [lastResult, setLastResult] = useState('等待旋转');
-  const [bet, setBet] = useState(10);
+  const [bet, setBet] = useState<number>(ALLOWED_BETS[1]);
   const [config, setConfig] = useState<Config | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
   const timers = useRef<number[]>([]);
@@ -68,7 +67,7 @@ export default function App() {
   const saveConfig = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!config) return;
     const form = new FormData(event.currentTarget);
-    const response = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ theoreticalRtp: form.get('rtp'), maxPayoutMultiplier: form.get('maxPayout') }) });
+    const response = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ maxWinMultiplier: Number(form.get('maxWin')) }) });
     const body = await response.json(); if (!response.ok) { setError(body.error || '保存失败'); return; }
     setConfig(body); setAdminOpen(false); setError('本机测试参数已保存。');
   };
@@ -82,9 +81,9 @@ export default function App() {
       <div className="result-overlay" aria-live="polite">{displayWin > 0 ? displayWin : ''}</div><div className={`spin-result-fx ${winAmount > 0 ? 'is-visible' : ''}`} aria-hidden="true"><span>赢分</span></div>
       <button className="spin-hitbox" type="button" aria-label="旋转" onClick={spin} disabled={busy || !config} />
     </section>
-    <div className="demo-controls"><label>投注 <select value={bet} onChange={(e) => setBet(Number(e.target.value))}>{(config?.allowedBets ?? [5, 10, 20, 50]).map((value) => <option value={value} key={value}>{value}</option>)}</select></label><button type="button" onClick={spin} disabled={busy || !config}>{busy ? '旋转中…' : '旋转'}</button><span>公开测试 RTP：{config?.theoreticalRtp ?? '--'}%</span></div>
+    <div className="demo-controls"><label>投注 <select value={bet} onChange={(e) => setBet(Number(e.target.value))}>{(config?.allowedBets ?? ALLOWED_BETS).map((value) => <option value={value} key={value}>{value}</option>)}</select></label><button type="button" onClick={spin} disabled={busy || !config}>{busy ? '旋转中…' : '旋转'}</button><span>理论 RTP：{config?.theoreticalRtp ?? '--'}%</span></div>
     <p className="spin-summary" aria-live="polite">{lastResult}</p>
     {error && <p className="demo-message">{error}</p>}
-    {adminOpen && config && <div className="admin-backdrop"><form className="admin-card" onSubmit={saveConfig}><h2>本机测试管理</h2><p>所有数值仅用于本机虚拟积分演示；没有充值、提现或真实货币。</p><label>全局理论 RTP（1–99%）<input name="rtp" type="number" min="1" max="99" step="1" defaultValue={config.theoreticalRtp} /></label><label>单次最大倍率（1–100）<input name="maxPayout" type="number" min="1" max="100" step="1" defaultValue={config.maxPayoutMultiplier} /></label><div><button type="button" onClick={() => setAdminOpen(false)}>取消</button><button type="submit">保存到本机</button></div></form></div>}
+    {adminOpen && config && <div className="admin-backdrop"><form className="admin-card" onSubmit={saveConfig}><h2>本机测试管理</h2><p>所有数值仅用于本机虚拟积分演示；没有充值、提现或真实货币。</p><p>理论 RTP：{config.theoreticalRtp}%（由卷轴条带和赔率表计算得出，修改方法见 src/engine）</p><label>单次最大赢分（投注的倍数，50–5000）<input name="maxWin" type="number" min="50" max="5000" step="1" defaultValue={config.maxWinMultiplier} /></label><div><button type="button" onClick={() => setAdminOpen(false)}>取消</button><button type="submit">保存到本机</button></div></form></div>}
   </main>;
 }
