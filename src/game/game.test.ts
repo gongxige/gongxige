@@ -1,0 +1,145 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { REEL_STRIPS, ROWS, gridFromStops } from '../engine/index.ts';
+import { ACCEL_MS, MIN_STOP_DISTANCE, OVERSHOOT, ReelMotion, SPIN_SPEED } from './reelMotion.ts';
+import { ReelTape } from './reelTape.ts';
+import { FIRST_STOP_MS, STOP_INTERVAL_MS, SpinController } from './spinController.ts';
+
+/** Run the motion frame by frame (60fps) until it lands; returns every position seen. */
+function runUntilLanded(motion: ReelMotion, from: number): { positions: number[]; landedAt: number } {
+  const positions: number[] = [];
+  for (let now = from; now < from + 10_000; now += 16) {
+    const landed = motion.update(now);
+    positions.push(motion.position);
+    if (landed) return { positions, landedAt: now };
+  }
+  throw new Error('Reel never landed');
+}
+
+describe('ReelMotion', () => {
+  it('reaches full speed after the acceleration phase', () => {
+    const motion = new ReelMotion();
+    motion.start(0);
+    motion.update(ACCEL_MS + 100);
+    const a = motion.position;
+    motion.update(ACCEL_MS + 200);
+    assert.ok(Math.abs((motion.position - a) / 100 - SPIN_SPEED) < 1e-9);
+    assert.ok(motion.canStop);
+  });
+
+  it('lands exactly on a whole-number target far enough ahead to place symbols off-screen', () => {
+    const motion = new ReelMotion();
+    motion.start(0);
+    motion.update(1000);
+    const before = motion.position;
+    const target = motion.stop(1000);
+    assert.ok(Number.isInteger(target));
+    assert.ok(target >= Math.ceil(before) + MIN_STOP_DISTANCE);
+    const { positions } = runUntilLanded(motion, 1016);
+    assert.equal(motion.position, target);
+    assert.ok(motion.isIdle);
+    // Overshoots by OVERSHOOT, then springs back.
+    assert.ok(Math.abs(Math.max(...positions) - (target + OVERSHOOT)) < 0.01);
+  });
+
+  it('keeps the same speed when it starts decelerating (no jolt)', () => {
+    const motion = new ReelMotion();
+    motion.start(0);
+    motion.update(1000);
+    motion.stop(1000);
+    const start = motion.position;
+    motion.update(1001);
+    assert.ok(Math.abs((motion.position - start) - SPIN_SPEED) / SPIN_SPEED < 0.01);
+  });
+
+  it('only moves forward until the overshoot', () => {
+    const motion = new ReelMotion();
+    motion.start(0);
+    motion.update(800);
+    const target = motion.stop(800);
+    const { positions } = runUntilLanded(motion, 816);
+    const peak = positions.indexOf(Math.max(...positions));
+    for (let i = 1; i <= peak; i += 1) assert.ok(positions[i] >= positions[i - 1]);
+    assert.ok(positions[positions.length - 1] === target);
+  });
+});
+
+describe('ReelTape', () => {
+  it('shows the strip window for the anchor stop', () => {
+    const tape = new ReelTape(REEL_STRIPS[0], 10);
+    assert.deepEqual([0, 1, 2, 3].map((i) => tape.symbolAt(i)), REEL_STRIPS[0].slice(10, 14));
+  });
+
+  it('landing changes only the indices from the landing window upward', () => {
+    const tape = new ReelTape(REEL_STRIPS[2], 0);
+    const below = [-2, -1, 0, 1, 2].map((i) => tape.symbolAt(i));
+    tape.land(-9, 30);
+    assert.deepEqual([-9, -8, -7, -6].map((i) => tape.symbolAt(i)), REEL_STRIPS[2].slice(30, 34));
+    assert.equal(tape.symbolAt(-10), REEL_STRIPS[2][29], 'above the window continues the real strip');
+    assert.deepEqual([-2, -1, 0, 1, 2].map((i) => tape.symbolAt(i)), below, 'symbols already on screen are unchanged');
+  });
+});
+
+describe('SpinController', () => {
+  const visibleGrid = (controller: SpinController) =>
+    controller.motions.map((motion, reel) => Array.from({ length: ROWS }, (_, row) => controller.tapes[reel].symbolAt(row - motion.position)));
+
+  function spinTo(stops: number[], resultAt: number) {
+    const controller = new SpinController([0, 0, 0, 0, 0]);
+    controller.start(0);
+    const landings: { reel: number; at: number }[] = [];
+    let now = 0;
+    for (; now < 10_000; now += 16) {
+      if (now >= resultAt) controller.setResult(stops, now);
+      const { landedReels, allLanded } = controller.tick(now);
+      landedReels.forEach((reel) => landings.push({ reel, at: now }));
+      if (allLanded) break;
+    }
+    return { controller, landings, finishedAt: now };
+  }
+
+  it('lands every reel on the server stops', () => {
+    const stops = [5, 17, 33, 2, 60];
+    const { controller, landings } = spinTo(stops, 120);
+    assert.deepEqual(visibleGrid(controller), gridFromStops(stops));
+    assert.deepEqual(landings.map((l) => l.reel), [0, 1, 2, 3, 4], 'reels land left to right');
+    assert.ok(!controller.isSpinning);
+  });
+
+  it('waits for the minimum spin time, and for a slow server', () => {
+    const fast = spinTo([1, 1, 1, 1, 1], 50);
+    const slow = spinTo([1, 1, 1, 1, 1], 1500);
+    assert.ok(fast.landings[0].at > FIRST_STOP_MS);
+    assert.ok(slow.landings[0].at > 1500);
+    const gaps = fast.landings.slice(1).map((l, i) => l.at - fast.landings[i].at);
+    // Reels start decelerating exactly STOP_INTERVAL_MS apart; the braking distance
+    // varies by up to one symbol, so landings can drift by up to 2/SPIN_SPEED ms.
+    gaps.forEach((gap) => assert.ok(Math.abs(gap - STOP_INTERVAL_MS) <= 2 / SPIN_SPEED + 32, `gap ${gap}`));
+  });
+
+  it('quick stop lands much sooner and still on the right symbols', () => {
+    const stops = [8, 9, 10, 11, 12];
+    const controller = new SpinController([0, 0, 0, 0, 0]);
+    controller.start(0);
+    let now = 0;
+    for (; now < 10_000; now += 16) {
+      if (now >= 100) controller.setResult(stops, now);
+      if (now >= 600) controller.quickStop(now);
+      if (controller.tick(now).allLanded) break;
+    }
+    assert.ok(now < FIRST_STOP_MS + 4 * STOP_INTERVAL_MS, `finished at ${now}`);
+    assert.deepEqual(visibleGrid(controller), gridFromStops(stops));
+  });
+
+  it('a failed request (null result) still brings every reel to rest', () => {
+    const controller = new SpinController([0, 0, 0, 0, 0]);
+    controller.start(0);
+    let now = 0;
+    for (; now < 10_000; now += 16) {
+      controller.setResult(null, now);
+      if (controller.tick(now).allLanded) break;
+    }
+    assert.ok(!controller.isSpinning);
+    controller.motions.forEach((motion) => assert.ok(Number.isInteger(motion.position)));
+  });
+});
