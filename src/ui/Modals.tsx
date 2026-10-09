@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { BET_MULTIPLIER, SCATTER, SCATTER_PAYTABLE, WAYS_PAYTABLE, WAYS_SYMBOLS } from '../engine/index.ts';
+import { BET_MULTIPLIER, FREE_SPINS_AWARD, FREE_SPINS_TRIGGER, SCATTER, SCATTER_PAYTABLE, WAYS_PAYTABLE, WAYS_SYMBOLS, WILD } from '../engine/index.ts';
 import { symbolSrc } from '../useReels.ts';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -34,7 +34,9 @@ export function RulesModal({ bet, onClose }: { bet: number; onClose: () => void 
           </tr>
         </tbody>
       </table>
-      <p className="modal-note">金币为分散符号：任意位置出现 3 / 4 / 5 个及以上，按总投注倍数赢分。多个中奖同时成立时全部相加。</p>
+      <div className="rule-row"><img src={symbolSrc(WILD)} alt="百搭" /><p><strong>百搭</strong>：只出现在第 2、3、4 列，可代替除金币外的所有符号，本身不单独赢分。</p></div>
+      <div className="rule-row"><img src={symbolSrc(SCATTER)} alt="金币" /><p><strong>金币</strong>：任意位置出现 {FREE_SPINS_TRIGGER} 个及以上，按总投注倍数赢分（见表最后一行），并获得 <strong>{FREE_SPINS_AWARD} 次免费游戏</strong>。免费游戏不扣分、沿用触发时的投注、自动进行；免费游戏中再出 {FREE_SPINS_TRIGGER} 个金币，再加 {FREE_SPINS_AWARD} 次。</p></div>
+      <p className="modal-note">多个中奖同时成立时全部相加。</p>
     </Modal>
   );
 }

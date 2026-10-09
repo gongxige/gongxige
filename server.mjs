@@ -8,7 +8,7 @@ import { ALLOWED_BETS, computeRtp, isAllowedBet, spin } from './src/engine/index
 
 const port = Number(process.env.API_PORT ?? 8787);
 // v2: bets and payouts changed with the engine rewrite, so old balances are not carried over.
-const statePath = join(process.cwd(), 'data', 'local-slot-state.v2.json');
+const statePath = join(process.cwd(), 'data', process.env.STATE_FILE ?? 'local-slot-state.v2.json');
 const theoreticalRtp = Math.round(computeRtp().total * 10000) / 100;
 const MAX_WIN_RANGE = [50, 5000];
 const defaultState = { settings: { maxWinMultiplier: 1000, updatedAt: null }, sessions: {}, recentSpins: [] };
@@ -31,7 +31,10 @@ const startingCredits = 10_000;
 function publicConfig(state) {
   return { title: 'Wild Frontier 本机测试服', mode: 'local-demo', startingCredits, allowedBets: ALLOWED_BETS, theoreticalRtp, ...state.settings };
 }
-function sessionFor(state, sessionId) { return state.sessions[sessionId] ?? { credits: startingCredits }; }
+// A session is { credits, freeSpins }. freeSpins is null, or the free-spin
+// round in progress: { bet, remaining, played, totalWin }. It lives on the
+// server so a reload resumes the round instead of losing it.
+function sessionFor(state, sessionId) { return { freeSpins: null, ...(state.sessions[sessionId] ?? { credits: startingCredits }) }; }
 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -41,7 +44,8 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, publicConfig(state));
     if (req.method === 'GET' && url.pathname === '/api/session') {
       const sessionId = url.searchParams.get('sessionId') || 'local-browser';
-      return json(res, 200, { sessionId, credits: sessionFor(state, sessionId).credits });
+      const session = sessionFor(state, sessionId);
+      return json(res, 200, { sessionId, credits: session.credits, freeSpins: session.freeSpins });
     }
     if (req.method === 'GET' && url.pathname === '/api/recent-spins') return json(res, 200, state.recentSpins.slice(0, 20));
 
@@ -56,21 +60,47 @@ createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/spin') {
       const input = await readBody(req);
-      const bet = Number(input.bet);
       const sessionId = String(input.sessionId || 'local-browser');
-      if (!isAllowedBet(bet)) return json(res, 400, { error: '无效投注档位。' });
       const session = sessionFor(state, sessionId);
-      if (session.credits < bet) return json(res, 400, { error: '演示积分不足。' });
+      const free = session.freeSpins;
+      // During free spins the stored bet is used and nothing is charged.
+      const bet = free ? free.bet : Number(input.bet);
+      if (!free) {
+        if (!isAllowedBet(bet)) return json(res, 400, { error: '无效投注档位。' });
+        if (session.credits < bet) return json(res, 400, { error: '演示积分不足。' });
+      }
 
       const outcome = spin(bet, randomInt, state.settings.maxWinMultiplier);
-      session.credits = session.credits - bet + outcome.payout;
+      session.credits += outcome.payout - (free ? 0 : bet);
+      let freeSpinsFinished = null;
+      if (free) {
+        free.remaining += outcome.freeSpinsAwarded - 1;
+        free.played += 1;
+        free.totalWin += outcome.payout;
+        if (free.remaining === 0) { freeSpinsFinished = { played: free.played, totalWin: free.totalWin }; session.freeSpins = null; }
+      } else if (outcome.freeSpinsAwarded > 0) {
+        session.freeSpins = { bet, remaining: outcome.freeSpinsAwarded, played: 0, totalWin: 0 };
+      }
       state.sessions[sessionId] = session;
-      state.recentSpins.unshift({ at: new Date().toISOString(), sessionId, bet, payout: outcome.payout, credits: session.credits, stops: outcome.stops });
+      state.recentSpins.unshift({ at: new Date().toISOString(), sessionId, mode: free ? 'free' : 'paid', bet, payout: outcome.payout, credits: session.credits, stops: outcome.stops });
       state.recentSpins = state.recentSpins.slice(0, 100);
       save(state);
 
       const winningCells = [...new Set(outcome.wins.flatMap((win) => win.cells.map(({ reel, row }) => `${row}-${reel}`)))];
-      return json(res, 200, { stops: outcome.stops, grid: outcome.grid, wins: outcome.wins, winningCells, payout: outcome.payout, capped: outcome.capped, credits: session.credits });
+      return json(res, 200, {
+        mode: free ? 'free' : 'paid',
+        bet,
+        stops: outcome.stops,
+        grid: outcome.grid,
+        wins: outcome.wins,
+        winningCells,
+        payout: outcome.payout,
+        capped: outcome.capped,
+        credits: session.credits,
+        freeSpinsAwarded: outcome.freeSpinsAwarded,
+        freeSpins: session.freeSpins,
+        freeSpinsFinished,
+      });
     }
 
     json(res, 404, { error: 'Not found' });

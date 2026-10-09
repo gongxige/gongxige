@@ -136,3 +136,19 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .modal-actions button { padding: 8px 14px; border: 1px solid #f0d870; border-radius: 7px; background: transparent; }
 .modal-actions .primary { background: #f0d870; color: #35104f; font-weight: 700; }
+
+/* ---------- Free spins ---------- */
+.stage.is-free { background:
+    radial-gradient(ellipse 30% 55% at 4% 55%, #8a2a6a99, transparent 70%),
+    radial-gradient(ellipse 30% 55% at 96% 55%, #8a2a6a99, transparent 70%),
+    radial-gradient(ellipse 70% 40% at 50% 110%, #b8501a, transparent 70%),
+    linear-gradient(#2a0c33, #4a1240 55%, #1a0619); }
+.free-banner { position: absolute; left: 50%; top: 15.2%; translate: -50% 0; z-index: 4; padding: .45cqw 2.4cqw; border: .2cqw solid var(--gold-hi); border-radius: 2cqw; background: linear-gradient(#ff8a3d, #c43a12 60%, #7a1a06); color: #fff6d8; font: 800 1.45cqw/1.2 system-ui, "Microsoft YaHei", sans-serif; letter-spacing: .1cqw; white-space: nowrap; text-shadow: 0 .12cqw 0 #5a1000; box-shadow: 0 0 1.2cqw #ff9a3d99, 0 .3cqw .6cqw #000a; }
+.feature-overlay { position: absolute; inset: 14.5% 0 11.6% 0; z-index: 9; display: grid; place-content: center; justify-items: center; gap: .6cqw; border: 0; background: radial-gradient(ellipse at center, #2a0640dd, #0b0219ee 70%); color: #fff; animation: overlay-in .45s cubic-bezier(.18,.9,.25,1.2) both; }
+.feature-overlay img { width: 13cqw; filter: drop-shadow(0 0 1.6cqw #ffd34c); animation: coin-shine .4s ease-in-out infinite alternate; }
+.feature-overlay strong { font: 900 4.6cqw/1.1 system-ui, "Microsoft YaHei", sans-serif; color: #ffe27a; -webkit-text-stroke: .1cqw #7a3a00; text-shadow: 0 0 1.6cqw #ff9900, 0 .3cqw 0 #5a2000; letter-spacing: .4cqw; }
+.feature-overlay span { font: 700 2.4cqw/1.3 system-ui, "Microsoft YaHei", sans-serif; color: #fff0c8; }
+.feature-overlay b { font: 900 3.6cqw/1 Georgia, serif; color: #ffd84d; text-shadow: 0 0 1cqw #ff7f00; }
+@keyframes overlay-in { from { opacity: 0; scale: .7; } to { opacity: 1; scale: 1; } }
+.spin-button.is-free:not(.is-spinning) { background: linear-gradient(#ffb36b, #e0661a 50%, #8a3a00); border-color: #ffe0b8; filter: none; }
+.rule-row { display: flex; align-items: center; gap: 12px; } .rule-row img { width: 72px; height: 60px; flex: none; object-fit: contain; } .rule-row p { margin: 6px 0; }

@@ -7,7 +7,26 @@ import { RulesModal, SettingsModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
 
 type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
-type SpinResult = { stops: number[]; grid: SymbolId[][]; wins: Win[]; winningCells: string[]; payout: number; capped: boolean; credits: number };
+type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
+type SpinResult = {
+  mode: 'paid' | 'free';
+  bet: number;
+  stops: number[];
+  grid: SymbolId[][];
+  wins: Win[];
+  winningCells: string[];
+  payout: number;
+  capped: boolean;
+  credits: number;
+  freeSpinsAwarded: number;
+  freeSpins: FreeSpins | null;
+  freeSpinsFinished: { played: number; totalWin: number } | null;
+};
+type Overlay = { kind: 'awarded'; count: number; retrigger: boolean } | { kind: 'finished'; played: number; totalWin: number };
+
+/** Pause between free spins: longer after a win so it can be seen. */
+const FREE_SPIN_DELAY_MS = { win: 1600, noWin: 700 };
+const OVERLAY_MS = { awarded: 2600, finished: 3600 };
 
 const sessionId = 'local-browser-demo-v1';
 
@@ -45,11 +64,15 @@ export default function App() {
   const [message, setMessage] = useState('按"旋转"或空格键开始');
   const [error, setError] = useState('');
   const [modal, setModal] = useState<'rules' | 'settings' | null>(null);
+  const [freeSpins, setFreeSpins] = useState<FreeSpins | null>(null);
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
   const displayWin = useCountUp(win.amount, win.bet);
+  const inFreeSpins = freeSpins !== null;
 
   const loadSession = async () => {
-    const session = await fetchJson<{ credits: number }>(`/api/session?sessionId=${encodeURIComponent(sessionId)}`);
+    const session = await fetchJson<{ credits: number; freeSpins: FreeSpins | null }>(`/api/session?sessionId=${encodeURIComponent(sessionId)}`);
     setCredits(session.credits);
+    setFreeSpins(session.freeSpins ?? null);
   };
 
   useEffect(() => {
@@ -63,14 +86,16 @@ export default function App() {
 
   const spin = () => {
     if (spinning) { reels.quickStop(); return; }
-    if (!config || modal) return;
-    if (credits < bet) { setError('演示积分不足。'); return; }
+    if (!config || modal || overlay) return;
+    // Free spins use the bet they were won with and cost nothing.
+    const spinBet = freeSpins ? freeSpins.bet : bet;
+    if (!freeSpins && credits < bet) { setError('演示积分不足。'); return; }
 
     setError('');
-    setWin({ amount: 0, bet, cells: [] });
+    setWin({ amount: 0, bet: spinBet, cells: [] });
     setSpinning(true);
-    setCredits((value) => value - bet);
-    setMessage('旋转中…');
+    if (!freeSpins) setCredits((value) => value - bet);
+    setMessage(freeSpins ? '免费游戏中…' : '旋转中…');
 
     // The reels start now; the result lands whenever the server answers.
     let result: SpinResult | null = null;
@@ -78,14 +103,31 @@ export default function App() {
       setSpinning(false);
       if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
-      setWin({ amount: result.payout, bet, cells: result.winningCells });
-      setMessage(result.payout > 0 ? '' : '本局未中奖，再来一次');
+      setWin({ amount: result.payout, bet: result.bet, cells: result.winningCells });
+      setFreeSpins(result.freeSpins ?? null);
+      setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');
+      if (result.freeSpinsAwarded > 0) setOverlay({ kind: 'awarded', count: result.freeSpinsAwarded, retrigger: result.mode === 'free' });
+      else if (result.freeSpinsFinished) setOverlay({ kind: 'finished', ...result.freeSpinsFinished });
     });
     fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, sessionId }) })
       .then((body) => { result = body; reels.setResult(body.stops); })
       .catch((e: Error) => { setError(e.message); reels.setResult(null); });
   };
+
+  // Free spins play themselves: spin again shortly after each one lands.
+  useEffect(() => {
+    if (spinning || overlay || modal || !freeSpins || freeSpins.remaining <= 0) return;
+    const timer = setTimeout(() => spinRef.current(), win.amount > 0 ? FREE_SPIN_DELAY_MS.win : FREE_SPIN_DELAY_MS.noWin);
+    return () => clearTimeout(timer);
+  }, [spinning, overlay, modal, freeSpins, win.amount]);
+
+  // Announcements close by themselves (or on click).
+  useEffect(() => {
+    if (!overlay) return;
+    const timer = setTimeout(() => setOverlay(null), OVERLAY_MS[overlay.kind]);
+    return () => clearTimeout(timer);
+  }, [overlay]);
 
   // Space bar spins (or stops early), unless the player is typing in a form.
   const spinRef = useRef(spin);
@@ -113,18 +155,30 @@ export default function App() {
 
   const showWin = !spinning && win.amount > 0;
   const bigWin = showWin && win.amount >= 10 * win.bet;
-  const spinDisabled = !config || (!spinning && credits < bet);
+  // During free spins the button only works as "stop".
+  const spinDisabled = !config || (!spinning && (inFreeSpins || overlay !== null || credits < bet));
+  const shownBet = freeSpins ? freeSpins.bet : bet;
+  const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
   return <main className="game-shell">
-    <section className={`stage ${showWin ? 'has-win' : ''}`} aria-label="Wild Frontier 1024 Ways">
-      <TopBar credits={credits} bet={bet} win={showWin ? win.amount : 0} disabled={spinning} onRules={() => setModal('rules')} onSettings={() => setModal('settings')} />
+    <section className={`stage ${showWin ? 'has-win' : ''} ${inFreeSpins ? 'is-free' : ''}`} aria-label="Wild Frontier 1024 Ways">
+      <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} disabled={spinning || inFreeSpins} onRules={() => setModal('rules')} onSettings={() => setModal('settings')} />
       <div className="reel-frame" aria-hidden="true" />
       <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
       <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
       <ReelBoard reels={reels} winningCells={showWin ? win.cells : []} />
       {bigWin && <div className="big-win" aria-hidden="true"><img src="/reels/coin.png" alt="" /><strong>{displayWin.toLocaleString('zh-CN')}</strong><span>大奖</span></div>}
+      {freeSpins && <div className="free-banner" aria-live="polite">{freeMessage}</div>}
+      {overlay && (
+        <button type="button" className={`feature-overlay is-${overlay.kind}`} onClick={() => setOverlay(null)}>
+          <img src="/reels/coin.png" alt="" />
+          {overlay.kind === 'awarded'
+            ? <><strong>{overlay.retrigger ? '再获得' : '恭喜获得'}</strong><span><b>{overlay.count}</b> 次免费游戏</span></>
+            : <><strong>免费游戏结束</strong><span>共 {overlay.played} 局 · 总赢分 <b>{overlay.totalWin.toLocaleString('zh-CN')}</b></span></>}
+        </button>
+      )}
       {error && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
-      <ControlBar bet={bet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} winDisplay={showWin ? displayWin : null} message={message} spinning={spinning} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
+      <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>
     <p className="rotate-hint">横屏体验更好</p>
     {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
