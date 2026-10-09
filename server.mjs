@@ -70,7 +70,7 @@ createServer(async (req, res) => {
       save(state);
 
       const winningCells = [...new Set(outcome.wins.flatMap((win) => win.cells.map(({ reel, row }) => `${row}-${reel}`)))];
-      return json(res, 200, { grid: outcome.grid, wins: outcome.wins, winningCells, payout: outcome.payout, capped: outcome.capped, credits: session.credits });
+      return json(res, 200, { stops: outcome.stops, grid: outcome.grid, wins: outcome.wins, winningCells, payout: outcome.payout, capped: outcome.capped, credits: session.credits });
     }
 
     json(res, 404, { error: 'Not found' });

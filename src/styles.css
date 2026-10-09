@@ -13,17 +13,18 @@ button { font: inherit; }
 .reel-board { position: absolute; left: 11.35%; top: 20.15%; width: 78.55%; height: 63.45%; display: grid; grid-template-columns: repeat(5, 1fr); overflow: hidden; background: #efe4aa; }
 .reel-column { position: relative; min-width: 0; overflow: hidden; border-right: 2px solid rgba(114, 66, 11, .45); background: #eee3a4; }
 .reel-column:first-child { border-left: 1px solid rgba(114, 66, 11, .45); }
-.reel-track { width: 100%; will-change: transform; }
-.reel-symbol { width: 100%; height: calc(100% / var(--track-length, 16)); display: grid; place-items: center; overflow: hidden; background: #efe4aa; }
-.reel-symbol img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
-.reel-column.is-spinning .reel-symbol img { filter: blur(2.4px) saturate(1.08) brightness(1.08); }
-.reel-column.is-spinning::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #ffffff44, transparent 18%, transparent 74%, #7b430033); animation: reel-sheen .16s linear infinite; }
-.reel-symbol.is-winning { position: relative; z-index: 2; box-shadow: inset 0 0 0 3px #70f5ff, inset 0 0 18px #0ddfff, 0 0 13px #0ddfff; animation: win-pulse .42s ease-in-out infinite alternate; }
-.reel-symbol.is-winning::after { content: ''; position: absolute; inset: 3px; border: 2px solid #c8ffff; border-radius: 4px; pointer-events: none; animation: win-border .5s ease-in-out infinite alternate; }
-.reel-symbol.is-winning.is-cleared img { opacity: 0; transition: opacity .18s ease-out; }
-.reel-symbol.is-winning.is-cleared { background: #efe4aa; }
+.reel-slot { position: absolute; left: 0; top: 0; width: 100%; height: 25%; will-change: transform; background: #efe4aa; }
+.reel-slot img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
+.reel-column.is-spinning .reel-slot img { filter: blur(2.4px) saturate(1.08) brightness(1.08); }
+.reel-column.is-spinning::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, #ffffff44, transparent 18%, transparent 74%, #7b430033); animation: reel-sheen .16s linear infinite; }
+
+/* Win highlight sits above the reels in the same 5×4 grid. */
+.win-grid { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(4, 1fr); pointer-events: none; }
+.win-cell { position: relative; }
+.win-cell.is-winning { box-shadow: inset 0 0 0 3px #70f5ff, inset 0 0 18px #0ddfff, 0 0 13px #0ddfff; animation: win-pulse .42s ease-in-out infinite alternate; }
+.win-cell.is-winning::after { content: ''; position: absolute; inset: 3px; border: 2px solid #c8ffff; border-radius: 4px; animation: win-border .5s ease-in-out infinite alternate; }
 @keyframes reel-sheen { from { transform: translateY(-16%); } to { transform: translateY(16%); } }
-@keyframes win-pulse { from { filter: brightness(1); } to { filter: brightness(1.28); } }
+@keyframes win-pulse { from { opacity: .75; } to { opacity: 1; } }
 @keyframes win-border { from { opacity: .55; } to { opacity: 1; } }
 
 .result-overlay { position: absolute; left: 37%; bottom: 2.6%; width: 26%; height: 7.4%; display: grid; place-items: center; color: #ffd84d; font: 700 clamp(14px, 2.3vw, 30px) Georgia, serif; text-shadow: 0 0 7px #ff7f00, 0 2px 2px #40001e; pointer-events: none; }

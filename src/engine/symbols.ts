@@ -10,6 +10,7 @@ export const SCATTER = 'coin';
 
 export type WaysSymbol = (typeof WAYS_SYMBOLS)[number];
 export type SymbolId = WaysSymbol | typeof SCATTER;
+export const ALL_SYMBOLS: readonly SymbolId[] = [...WAYS_SYMBOLS, SCATTER];
 
 /** grid[reel][row], row 0 is the top of the window. */
 export type Grid = SymbolId[][];
