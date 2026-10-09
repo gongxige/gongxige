@@ -4,7 +4,7 @@ import { randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ALLOWED_BETS, computeRtp, isAllowedBet, spin } from './src/engine/index.ts';
+import { ALLOWED_BETS, ENGINE_VERSION, computeRtp, isAllowedBet, spin } from './src/engine/index.ts';
 
 const port = Number(process.env.API_PORT ?? 8787);
 // v2: bets and payouts changed with the engine rewrite, so old balances are not carried over.
@@ -29,7 +29,7 @@ function readBody(req) {
 
 const startingCredits = 10_000;
 function publicConfig(state) {
-  return { title: 'Wild Frontier 本机测试服', mode: 'local-demo', startingCredits, allowedBets: ALLOWED_BETS, theoreticalRtp, ...state.settings };
+  return { title: 'Wild Frontier 本机测试服', mode: 'local-demo', engineVersion: ENGINE_VERSION, startingCredits, allowedBets: ALLOWED_BETS, theoreticalRtp, ...state.settings };
 }
 // A session is { credits, freeSpins }. freeSpins is null, or the free-spin
 // round in progress: { bet, remaining, played, totalWin }. It lives on the
@@ -88,6 +88,7 @@ createServer(async (req, res) => {
 
       const winningCells = [...new Set(outcome.wins.flatMap((win) => win.cells.map(({ reel, row }) => `${row}-${reel}`)))];
       return json(res, 200, {
+        engineVersion: ENGINE_VERSION,
         mode: free ? 'free' : 'paid',
         bet,
         stops: outcome.stops,
@@ -107,4 +108,4 @@ createServer(async (req, res) => {
   } catch (error) {
     json(res, 400, { error: error instanceof Error ? error.message : 'Bad request' });
   }
-}).listen(port, '127.0.0.1', () => console.log(`Local demo API: http://127.0.0.1:${port}  (theoretical RTP ${theoreticalRtp}%)`));
+}).listen(port, '127.0.0.1', () => console.log(`Local demo API: http://127.0.0.1:${port}  (theoretical RTP ${theoreticalRtp}%, engine ${ENGINE_VERSION})`));

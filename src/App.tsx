@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ALLOWED_BETS, type SymbolId, type Win } from './engine/index.ts';
+import { ALLOWED_BETS, ENGINE_VERSION, type SymbolId, type Win } from './engine/index.ts';
 import { ReelBoard } from './ReelBoard.tsx';
 import { useReels } from './useReels.ts';
 import { ControlBar } from './ui/ControlBar.tsx';
@@ -8,9 +8,10 @@ import { TopBar } from './ui/TopBar.tsx';
 import { BigWin, bigWinTier } from './ui/BigWin.tsx';
 import { useWinCycle } from './useWinCycle.ts';
 
-type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
+type Config = { engineVersion?: string; title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
 type SpinResult = {
+  engineVersion?: string;
   mode: 'paid' | 'free';
   bet: number;
   stops: number[];
@@ -31,6 +32,7 @@ const FREE_SPIN_DELAY_MS = { win: 1600, noWin: 700 };
 const OVERLAY_MS = { awarded: 2600, finished: 3600 };
 
 const sessionId = 'local-browser-demo-v1';
+const STALE_API_MESSAGE = '本机测试服务（npm run api）还是旧版本，规则和网页不一致。请在运行它的终端按 Ctrl+C，再重新运行 npm run api，然后刷新本页。';
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -68,6 +70,8 @@ export default function App() {
   const [pendingOverlay, setPendingOverlay] = useState<Overlay | null>(null);
   const [message, setMessage] = useState('按"旋转"或空格键开始');
   const [error, setError] = useState('');
+  // The API process was started before the current game rules: refuse to spin.
+  const [staleApi, setStaleApi] = useState(false);
   const [modal, setModal] = useState<'rules' | 'settings' | null>(null);
   const [freeSpins, setFreeSpins] = useState<FreeSpins | null>(null);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
@@ -83,6 +87,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const next = await fetchJson<Config>('/api/config');
+      if (next.engineVersion !== ENGINE_VERSION) setStaleApi(true);
       setConfig(next);
       setBet((current) => (next.allowedBets.includes(current) ? current : next.allowedBets[0]));
       await loadSession();
@@ -91,7 +96,7 @@ export default function App() {
 
   const spin = () => {
     if (spinning) { reels.quickStop(); return; }
-    if (!config || modal || overlay || celebrating) return;
+    if (!config || modal || overlay || celebrating || staleApi) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
     if (!freeSpins && credits < bet) { setError('演示积分不足。'); return; }
@@ -119,7 +124,12 @@ export default function App() {
       if (bigWinTier(result.payout, result.bet)) { setCelebrating(true); setPendingOverlay(next); } else setOverlay(next);
     });
     fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, sessionId }) })
-      .then((body) => { result = body; reels.setResult(body.stops); })
+      .then((body) => {
+        // Never land the reels on a result computed with different rules.
+        if (body.engineVersion !== ENGINE_VERSION) { setStaleApi(true); reels.setResult(null); return; }
+        result = body;
+        reels.setResult(body.stops);
+      })
       .catch((e: Error) => { setError(e.message); reels.setResult(null); });
   };
 
@@ -180,7 +190,7 @@ export default function App() {
   const highlightKey = cycle ? cycle.cells.join(',') : '';
   useEffect(() => { reels.highlight(highlightKey ? highlightKey.split(',') : null); }, [highlightKey, reels.highlight]);
   // During free spins the button only works as "stop".
-  const spinDisabled = !config || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
+  const spinDisabled = !config || staleApi || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
   const shownBet = freeSpins ? freeSpins.bet : bet;
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
@@ -202,7 +212,8 @@ export default function App() {
             : <><strong>免费游戏结束</strong><span>共 {overlay.played} 局 · 总赢分 <b>{overlay.totalWin.toLocaleString('zh-CN')}</b></span></>}
         </button>
       )}
-      {error && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
+      {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
+      {error && !staleApi && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
       <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>
     <p className="rotate-hint">横屏体验更好</p>
