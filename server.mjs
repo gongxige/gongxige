@@ -36,7 +36,7 @@ function publicConfig(state) {
 // server so a reload resumes the round instead of losing it.
 function sessionFor(state, sessionId) { return { freeSpins: null, ...(state.sessions[sessionId] ?? { credits: startingCredits }) }; }
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   const state = load();
   try {
@@ -108,4 +108,21 @@ createServer(async (req, res) => {
   } catch (error) {
     json(res, 400, { error: error instanceof Error ? error.message : 'Bad request' });
   }
-}).listen(port, '127.0.0.1', () => console.log(`Local demo API: http://127.0.0.1:${port}  (theoretical RTP ${theoreticalRtp}%, engine ${ENGINE_VERSION})`));
+});
+
+// Port already taken: usually an API started earlier is still running.
+// Say whether it is up to date and how to stop it, instead of a stack trace.
+server.on('error', async (error) => {
+  if (error.code !== 'EADDRINUSE') throw error;
+  const running = await fetch(`http://127.0.0.1:${port}/api/config`).then((r) => r.json()).catch(() => null);
+  if (running?.engineVersion === ENGINE_VERSION) {
+    console.log(`端口 ${port} 上已经有一个最新版本的本机测试服务在运行，不需要再启动。`);
+  } else {
+    console.log(`端口 ${port} 被${running ? '旧版本的本机测试服务' : '其他程序'}占用。`);
+    console.log('在 PowerShell 里运行下面这行把它关掉，然后重新运行 npm run api：');
+    console.log(`  Stop-Process -Id (Get-NetTCPConnection -LocalPort ${port} -State Listen).OwningProcess`);
+  }
+  process.exit(1);
+});
+
+server.listen(port, '127.0.0.1', () => console.log(`Local demo API: http://127.0.0.1:${port}  (theoretical RTP ${theoreticalRtp}%, engine ${ENGINE_VERSION})`));
