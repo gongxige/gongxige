@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALLOWED_BETS, type SymbolId, type Win } from './engine/index.ts';
 import { ReelBoard } from './ReelBoard.tsx';
 import { useReels } from './useReels.ts';
 import { ControlBar } from './ui/ControlBar.tsx';
 import { RulesModal, SettingsModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
+import { BigWin, bigWinTier } from './ui/BigWin.tsx';
+import { useWinCycle } from './useWinCycle.ts';
 
 type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
@@ -60,7 +62,10 @@ export default function App() {
   const [credits, setCredits] = useState(0);
   const [bet, setBet] = useState<number>(ALLOWED_BETS[1]);
   const [spinning, setSpinning] = useState(false);
-  const [win, setWin] = useState<{ amount: number; bet: number; cells: string[] }>({ amount: 0, bet: 1, cells: [] });
+  const [win, setWin] = useState<{ amount: number; bet: number; wins: Win[] }>({ amount: 0, bet: 1, wins: [] });
+  // Big-win celebration in progress; free-spin announcements wait for it.
+  const [celebrating, setCelebrating] = useState(false);
+  const [pendingOverlay, setPendingOverlay] = useState<Overlay | null>(null);
   const [message, setMessage] = useState('按"旋转"或空格键开始');
   const [error, setError] = useState('');
   const [modal, setModal] = useState<'rules' | 'settings' | null>(null);
@@ -86,13 +91,13 @@ export default function App() {
 
   const spin = () => {
     if (spinning) { reels.quickStop(); return; }
-    if (!config || modal || overlay) return;
+    if (!config || modal || overlay || celebrating) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
     if (!freeSpins && credits < bet) { setError('演示积分不足。'); return; }
 
     setError('');
-    setWin({ amount: 0, bet: spinBet, cells: [] });
+    setWin({ amount: 0, bet: spinBet, wins: [] });
     setSpinning(true);
     if (!freeSpins) setCredits((value) => value - bet);
     setMessage(freeSpins ? '免费游戏中…' : '旋转中…');
@@ -103,12 +108,15 @@ export default function App() {
       setSpinning(false);
       if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
-      setWin({ amount: result.payout, bet: result.bet, cells: result.winningCells });
+      setWin({ amount: result.payout, bet: result.bet, wins: result.wins });
       setFreeSpins(result.freeSpins ?? null);
       setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');
-      if (result.freeSpinsAwarded > 0) setOverlay({ kind: 'awarded', count: result.freeSpinsAwarded, retrigger: result.mode === 'free' });
-      else if (result.freeSpinsFinished) setOverlay({ kind: 'finished', ...result.freeSpinsFinished });
+      const next: Overlay | null = result.freeSpinsAwarded > 0
+        ? { kind: 'awarded', count: result.freeSpinsAwarded, retrigger: result.mode === 'free' }
+        : result.freeSpinsFinished ? { kind: 'finished', ...result.freeSpinsFinished } : null;
+      // A big win is celebrated first; any free-spin announcement follows it.
+      if (bigWinTier(result.payout, result.bet)) { setCelebrating(true); setPendingOverlay(next); } else setOverlay(next);
     });
     fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, sessionId }) })
       .then((body) => { result = body; reels.setResult(body.stops); })
@@ -117,10 +125,23 @@ export default function App() {
 
   // Free spins play themselves: spin again shortly after each one lands.
   useEffect(() => {
-    if (spinning || overlay || modal || !freeSpins || freeSpins.remaining <= 0) return;
+    if (spinning || overlay || celebrating || modal || !freeSpins || freeSpins.remaining <= 0) return;
     const timer = setTimeout(() => spinRef.current(), win.amount > 0 ? FREE_SPIN_DELAY_MS.win : FREE_SPIN_DELAY_MS.noWin);
     return () => clearTimeout(timer);
-  }, [spinning, overlay, modal, freeSpins, win.amount]);
+  }, [spinning, overlay, celebrating, modal, freeSpins, win.amount]);
+
+  // Dev-only preview of the celebration: /?preview-bigwin=30 shows a 30× bet win.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const multiple = Number(new URLSearchParams(location.search).get('preview-bigwin'));
+    if (multiple > 0) { setWin({ amount: multiple * ALLOWED_BETS[1], bet: ALLOWED_BETS[1], wins: [] }); setCelebrating(true); }
+  }, []);
+
+  const endCelebration = useCallback(() => {
+    setCelebrating(false);
+    setOverlay(pendingOverlay);
+    setPendingOverlay(null);
+  }, [pendingOverlay]);
 
   // Announcements close by themselves (or on click).
   useEffect(() => {
@@ -154,9 +175,12 @@ export default function App() {
   };
 
   const showWin = !spinning && win.amount > 0;
-  const bigWin = showWin && win.amount >= 10 * win.bet;
+  // Winning symbols animate: all wins together, then one win at a time.
+  const cycle = useWinCycle(showWin ? win.wins : null, celebrating);
+  const highlightKey = cycle ? cycle.cells.join(',') : '';
+  useEffect(() => { reels.highlight(highlightKey ? highlightKey.split(',') : null); }, [highlightKey, reels.highlight]);
   // During free spins the button only works as "stop".
-  const spinDisabled = !config || (!spinning && (inFreeSpins || overlay !== null || credits < bet));
+  const spinDisabled = !config || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
   const shownBet = freeSpins ? freeSpins.bet : bet;
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
@@ -166,8 +190,9 @@ export default function App() {
       <div className="reel-frame" aria-hidden="true" />
       <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
       <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
-      <ReelBoard reels={reels} winningCells={showWin ? win.cells : []} />
-      {bigWin && <div className="big-win" aria-hidden="true"><img src="/reels/coin.png" alt="" /><strong>{displayWin.toLocaleString('zh-CN')}</strong><span>大奖</span></div>}
+      <ReelBoard reels={reels} winningCells={cycle ? cycle.cells : []} />
+      {cycle && !celebrating && <div className="win-caption" key={cycle.caption}>{cycle.caption}</div>}
+      {celebrating && <BigWin amount={win.amount} bet={win.bet} onDone={endCelebration} />}
       {freeSpins && <div className="free-banner" aria-live="polite">{freeMessage}</div>}
       {overlay && (
         <button type="button" className={`feature-overlay is-${overlay.kind}`} onClick={() => setOverlay(null)}>

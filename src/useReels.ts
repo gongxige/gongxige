@@ -59,11 +59,27 @@ export function useReels() {
     return () => cancelAnimationFrame(frame.current);
   }, []);
 
+  /**
+   * Animate the winning symbols and dim the rest. Only valid at rest, when
+   * slot k of each reel shows row k. `cells` holds "row-reel" keys; null
+   * clears everything.
+   */
+  const highlight = useCallback((cells: readonly string[] | null) => {
+    slots.current.forEach((reelSlots, reel) => reelSlots.forEach((slot, k) => {
+      if (!slot) return;
+      const winning = cells !== null && k < ROWS && cells.includes(`${k}-${reel}`);
+      slot.classList.toggle('is-win', winning);
+      slot.classList.toggle('is-dim', cells !== null && !winning);
+    }));
+  }, []);
+
   return {
+    highlight,
     registerColumn: (reel: number) => (el: HTMLDivElement | null) => { columns.current[reel] = el; },
     registerSlot: (reel: number, k: number) => (el: HTMLDivElement | null) => { slots.current[reel][k] = el; },
     initialSymbols,
     start(landed: () => void) {
+      highlight(null);
       onLanded.current = landed;
       controller.start(performance.now());
       frame.current = requestAnimationFrame(loop);
