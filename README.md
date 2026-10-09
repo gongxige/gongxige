@@ -17,10 +17,10 @@ npm run dev   # 终端 2：打开 http://127.0.0.1:4173
 
 ```
 src/engine/   游戏规则（纯逻辑 + 单元测试）
-src/          React 界面
+src/          React 界面（src/ui 为界面组件，src/game 为转动逻辑）
 server.mjs    本机测试服（余额记账）
 scripts/      工具脚本（RTP 报告）
 docs/         计划、日志、归档
-public/       运行时用到的图片
+public/       运行时用到的图片（符号）
 reference/    参考素材（不进 Git）
 ```

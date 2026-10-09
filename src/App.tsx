@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { ALLOWED_BETS, type SymbolId, type Win } from './engine/index.ts';
 import { ReelBoard } from './ReelBoard.tsx';
 import { useReels } from './useReels.ts';
+import { ControlBar } from './ui/ControlBar.tsx';
+import { RulesModal, SettingsModal } from './ui/Modals.tsx';
+import { TopBar } from './ui/TopBar.tsx';
 
 type Config = { title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
 type SpinResult = { stops: number[]; grid: SymbolId[][]; wins: Win[]; winningCells: string[]; payout: number; capped: boolean; credits: number };
@@ -39,9 +42,9 @@ export default function App() {
   const [bet, setBet] = useState<number>(ALLOWED_BETS[1]);
   const [spinning, setSpinning] = useState(false);
   const [win, setWin] = useState<{ amount: number; bet: number; cells: string[] }>({ amount: 0, bet: 1, cells: [] });
-  const [lastResult, setLastResult] = useState('按"旋转"或空格键开始');
+  const [message, setMessage] = useState('按"旋转"或空格键开始');
   const [error, setError] = useState('');
-  const [adminOpen, setAdminOpen] = useState(false);
+  const [modal, setModal] = useState<'rules' | 'settings' | null>(null);
   const displayWin = useCountUp(win.amount, win.bet);
 
   const loadSession = async () => {
@@ -60,23 +63,24 @@ export default function App() {
 
   const spin = () => {
     if (spinning) { reels.quickStop(); return; }
-    if (!config || adminOpen) return;
+    if (!config || modal) return;
     if (credits < bet) { setError('演示积分不足。'); return; }
 
     setError('');
     setWin({ amount: 0, bet, cells: [] });
     setSpinning(true);
     setCredits((value) => value - bet);
-    setLastResult('旋转中…');
+    setMessage('旋转中…');
 
     // The reels start now; the result lands whenever the server answers.
     let result: SpinResult | null = null;
     reels.start(() => {
       setSpinning(false);
-      if (!result) { loadSession().catch(() => {}); setLastResult('本次请求失败，余额已重新读取'); return; }
+      if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
       setWin({ amount: result.payout, bet, cells: result.winningCells });
-      setLastResult(`投注 ${bet} · 赢分 ${result.payout}${result.capped ? '（已达上限）' : ''} · 余额 ${result.credits}`);
+      setMessage(result.payout > 0 ? '' : '本局未中奖，再来一次');
+      if (result.capped) setError('本局赢分已达单次最大赢分上限。');
     });
     fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, sessionId }) })
       .then((body) => { result = body; reels.setResult(body.stops); })
@@ -96,13 +100,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const saveConfig = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  const saveSettings = async (maxWinMultiplier: number) => {
     try {
-      const body = await fetchJson<Config>('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ maxWinMultiplier: Number(form.get('maxWin')) }) });
+      const body = await fetchJson<Config>('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ maxWinMultiplier }) });
       setConfig(body);
-      setAdminOpen(false);
+      setModal(null);
       setError('本机测试参数已保存。');
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
@@ -110,25 +112,22 @@ export default function App() {
   };
 
   const showWin = !spinning && win.amount > 0;
+  const bigWin = showWin && win.amount >= 10 * win.bet;
   const spinDisabled = !config || (!spinning && credits < bet);
 
   return <main className="game-shell">
-    <div className="demo-toolbar"><span>本机测试服 · 虚拟积分 {credits}</span><button type="button" onClick={() => setAdminOpen(true)} disabled={spinning}>测试管理</button></div>
-    <section className={`reference-stage ${showWin ? 'has-win' : ''}`} aria-label="Wild Frontier 1024 Ways">
-      <img className="chrome-image" src="/reference-base.png" alt="" aria-hidden="true" />
+    <section className={`stage ${showWin ? 'has-win' : ''}`} aria-label="Wild Frontier 1024 Ways">
+      <TopBar credits={credits} bet={bet} win={showWin ? win.amount : 0} disabled={spinning} onRules={() => setModal('rules')} onSettings={() => setModal('settings')} />
+      <div className="reel-frame" aria-hidden="true" />
+      <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
+      <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
       <ReelBoard reels={reels} winningCells={showWin ? win.cells : []} />
-      {showWin && <img className="coin-effect" src="/reels/coin.png" alt="" aria-hidden="true" />}
-      <div className="result-overlay" aria-live="polite">{showWin ? displayWin : ''}</div>
-      <div className={`spin-result-fx ${showWin ? 'is-visible' : ''}`} aria-hidden="true"><span>赢分</span></div>
-      <button className="spin-hitbox" type="button" aria-label={spinning ? '停止' : '旋转'} onClick={spin} disabled={spinDisabled} />
+      {bigWin && <div className="big-win" aria-hidden="true"><img src="/reels/coin.png" alt="" /><strong>{displayWin.toLocaleString('zh-CN')}</strong><span>大奖</span></div>}
+      {error && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
+      <ControlBar bet={bet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} winDisplay={showWin ? displayWin : null} message={message} spinning={spinning} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>
-    <div className="demo-controls">
-      <label>投注 <select value={bet} onChange={(e) => setBet(Number(e.target.value))} disabled={spinning}>{(config?.allowedBets ?? ALLOWED_BETS).map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
-      <button type="button" onClick={spin} disabled={spinDisabled}>{spinning ? '停止' : '旋转'}</button>
-      <span>理论 RTP：{config?.theoreticalRtp ?? '--'}%</span>
-    </div>
-    <p className="spin-summary" aria-live="polite">{lastResult}</p>
-    {error && <p className="demo-message">{error}</p>}
-    {adminOpen && config && <div className="admin-backdrop"><form className="admin-card" onSubmit={saveConfig}><h2>本机测试管理</h2><p>所有数值仅用于本机虚拟积分演示；没有充值、提现或真实货币。</p><p>理论 RTP：{config.theoreticalRtp}%（由卷轴条带和赔率表计算得出，修改方法见 src/engine）</p><label>单次最大赢分（投注的倍数，50–5000）<input name="maxWin" type="number" min="50" max="5000" step="1" defaultValue={config.maxWinMultiplier} /></label><div><button type="button" onClick={() => setAdminOpen(false)}>取消</button><button type="submit">保存到本机</button></div></form></div>}
+    <p className="rotate-hint">横屏体验更好</p>
+    {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
+    {modal === 'settings' && config && <SettingsModal rtp={config.theoreticalRtp} maxWinMultiplier={config.maxWinMultiplier} onSave={saveSettings} onClose={() => setModal(null)} />}
   </main>;
 }
