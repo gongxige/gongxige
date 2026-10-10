@@ -22,6 +22,7 @@ export function useReels() {
   const columns = useRef<(HTMLDivElement | null)[]>([]);
   const slots = useRef<(HTMLDivElement | null)[][]>(Array.from({ length: REELS }, () => []));
   const frame = useRef(0);
+  const timer = useRef(0);
   const onLanded = useRef<() => void>(() => {});
 
   const draw = useCallback(() => {
@@ -44,11 +45,18 @@ export function useReels() {
     });
   }, [controller]);
 
+  // Browsers stop animation frames in hidden tabs; keep the spin moving with
+  // a (throttled) timer there so it still lands instead of freezing mid-air.
+  const schedule = () => {
+    if (document.hidden) timer.current = window.setTimeout(() => loop(performance.now()), 100);
+    else frame.current = requestAnimationFrame(loop);
+  };
+
   const loop = useCallback((now: number) => {
     const { allLanded } = controller.tick(now);
     draw();
     if (allLanded) onLanded.current();
-    else frame.current = requestAnimationFrame(loop);
+    else schedule();
   }, [controller, draw]);
 
   useLayoutEffect(draw, [draw]);
@@ -56,7 +64,15 @@ export function useReels() {
   useEffect(() => {
     // Preload every symbol so swapping images mid-spin never flashes.
     ALL_SYMBOLS.forEach((id) => { new Image().src = symbolSrc(id); });
-    return () => cancelAnimationFrame(frame.current);
+    // Switch between animation frames and the timer when the tab is hidden or shown mid-spin.
+    const onVisibility = () => {
+      if (!controller.isSpinning) return;
+      cancelAnimationFrame(frame.current);
+      clearTimeout(timer.current);
+      schedule();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { document.removeEventListener('visibilitychange', onVisibility); cancelAnimationFrame(frame.current); clearTimeout(timer.current); };
   }, []);
 
   /**
@@ -73,16 +89,28 @@ export function useReels() {
     }));
   }, []);
 
+  /** Show "×2"/"×3" on wilds (free spins). At rest only, like highlight; null clears. */
+  const showMultipliers = useCallback((multipliers: readonly (readonly number[])[] | null) => {
+    slots.current.forEach((reelSlots, reel) => reelSlots.forEach((slot, k) => {
+      if (!slot) return;
+      const m = multipliers && k < ROWS ? multipliers[reel][k] : 1;
+      if (m > 1) slot.dataset.multiplier = `×${m}`;
+      else delete slot.dataset.multiplier;
+    }));
+  }, []);
+
   return {
     highlight,
+    showMultipliers,
     registerColumn: (reel: number) => (el: HTMLDivElement | null) => { columns.current[reel] = el; },
     registerSlot: (reel: number, k: number) => (el: HTMLDivElement | null) => { slots.current[reel][k] = el; },
     initialSymbols,
     start(landed: () => void) {
       highlight(null);
+      showMultipliers(null);
       onLanded.current = landed;
       controller.start(performance.now());
-      frame.current = requestAnimationFrame(loop);
+      schedule();
     },
     setResult: (stops: number[] | null) => controller.setResult(stops, performance.now()),
     quickStop: () => controller.quickStop(performance.now()),

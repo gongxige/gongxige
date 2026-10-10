@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { BET_MULTIPLIER, FREE_SPINS_AWARD, FREE_SPINS_TRIGGER, SCATTER, SCATTER_PAYTABLE, WAYS_PAYTABLE, WAYS_SYMBOLS, WILD } from '../engine/index.ts';
+import { BET_MULTIPLIER, FREE_SPIN_WILD_MULTIPLIERS, FREE_SPINS_FROM_BASE, FREE_SPINS_RETRIGGER, SCATTER, SCATTER_PAYTABLE, WAYS_PAYTABLE, WAYS_SYMBOLS, WILD } from '../engine/index.ts';
 import { symbolSrc } from '../useReels.ts';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -13,29 +13,47 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
+/** "3、4 或 5 个 → 8、15 或 20 次" style list from an award table. */
+const awardText = (table: Readonly<Record<number, number>>) => {
+  const counts = Object.keys(table).map(Number).sort((a, b) => a - b);
+  return { counts: counts.join('、'), spins: counts.map((n) => table[n]).join('、') };
+};
+
 export function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
   const unit = bet / BET_MULTIPLIER;
+  const base = awardText(FREE_SPINS_FROM_BASE);
+  const extra = awardText(FREE_SPINS_RETRIGGER);
   return (
     <Modal title="规则与赔率" onClose={onClose}>
-      <p>1024 Ways：同一符号从<strong>最左列开始</strong>，连续出现在 3 列或以上即中奖，不限行。每列出现几个就乘几，例如第 1 列 2 个、第 2 列 1 个、第 3 列 2 个 = 4 路。</p>
+      <p>1024 Ways：同一符号从<strong>最左列开始</strong>，连续出现在 3 列或以上即中奖（水牛 2 列即可），不限行。每列出现几个就乘几，例如第 1 列 2 个、第 2 列 1 个、第 3 列 2 个 = 4 路。</p>
       <p>下表为当前投注 <strong>{bet}</strong> 时<strong>每一路</strong>的赢分。</p>
       <table className="paytable">
-        <thead><tr><th>符号</th><th>3 连</th><th>4 连</th><th>5 连</th></tr></thead>
+        <thead><tr><th>符号</th><th>2 连</th><th>3 连</th><th>4 连</th><th>5 连</th></tr></thead>
         <tbody>
           {WAYS_SYMBOLS.map((symbol) => (
             <tr key={symbol}>
               <td><img src={symbolSrc(symbol)} alt={symbol} /></td>
-              {([3, 4, 5] as const).map((n) => <td key={n}>{WAYS_PAYTABLE[symbol][n] * unit}</td>)}
+              {([2, 3, 4, 5] as const).map((n) => {
+                const pay = WAYS_PAYTABLE[symbol][n];
+                return <td key={n}>{pay ? pay * unit : '–'}</td>;
+              })}
             </tr>
           ))}
           <tr className="scatter-row">
             <td><img src={symbolSrc(SCATTER)} alt="金币" /></td>
+            <td>–</td>
             {([3, 4, 5] as const).map((n) => <td key={n}>{SCATTER_PAYTABLE[n] * bet}</td>)}
           </tr>
         </tbody>
       </table>
       <div className="rule-row"><img src={symbolSrc(WILD)} alt="百搭" /><p><strong>百搭</strong>：只出现在第 2、3、4 列，可代替除金币外的所有符号，本身不单独赢分。</p></div>
-      <div className="rule-row"><img src={symbolSrc(SCATTER)} alt="金币" /><p><strong>金币</strong>：任意位置出现 {FREE_SPINS_TRIGGER} 个及以上，按总投注倍数赢分（见表最后一行），并获得 <strong>{FREE_SPINS_AWARD} 次免费游戏</strong>。免费游戏不扣分、沿用触发时的投注、自动进行；免费游戏中再出 {FREE_SPINS_TRIGGER} 个金币，再加 {FREE_SPINS_AWARD} 次。</p></div>
+      <div className="rule-row"><img src={symbolSrc(SCATTER)} alt="金币" /><p><strong>金币</strong>：任意位置出现 3 个及以上，按总投注倍数赢分（见表最后一行）。{base.counts} 个金币分别获得 <strong>{base.spins} 次免费游戏</strong>。</p></div>
+      <h3 className="rules-heading">免费游戏</h3>
+      <ul className="rules-list">
+        <li>不扣分，沿用触发时的投注，自动进行。</li>
+        <li>第 2、3、4 列出现的每个百搭随机带 <strong>×{FREE_SPIN_WILD_MULTIPLIERS.join(' 或 ×')}</strong> 倍数；一条中奖路线经过多个百搭时，倍数相乘（例如 ×2 和 ×3 = ×6）。</li>
+        <li>免费游戏中出现 {extra.counts} 个金币，分别<strong>额外获得 {extra.spins} 次</strong>免费游戏。</li>
+      </ul>
       <p className="modal-note">多个中奖同时成立时全部相加。</p>
     </Modal>
   );

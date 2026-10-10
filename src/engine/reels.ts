@@ -7,7 +7,7 @@ import { REELS, ROWS, type Grid, type SymbolId } from './symbols.ts';
 type StripCounts = Partial<Record<SymbolId, number>>;
 
 const STRIP_COUNTS: StripCounts[] = [
-  { lion: 4, elephant: 4, bull: 5, deer: 5, zebra: 5, A: 6, K: 6, Q: 7, J: 7, '10': 8, '9': 8, coin: 2 },
+  { lion: 4, elephant: 4, bull: 4, deer: 5, zebra: 5, A: 6, K: 6, Q: 8, J: 7, '10': 10, '9': 10, coin: 2 },
   { lion: 4, elephant: 4, bull: 5, deer: 5, zebra: 5, A: 6, K: 6, Q: 7, J: 7, '10': 8, '9': 8, coin: 2, wild: 1 },
   { lion: 4, elephant: 4, bull: 4, deer: 5, zebra: 5, A: 6, K: 6, Q: 7, J: 7, '10': 8, '9': 8, coin: 2, wild: 1 },
   { lion: 3, elephant: 4, bull: 4, deer: 4, zebra: 5, A: 6, K: 6, Q: 7, J: 7, '10': 8, '9': 8, coin: 2, wild: 1 },

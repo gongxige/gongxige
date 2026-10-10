@@ -34,7 +34,12 @@ function publicConfig(state) {
 // A session is { credits, freeSpins }. freeSpins is null, or the free-spin
 // round in progress: { bet, remaining, played, totalWin }. It lives on the
 // server so a reload resumes the round instead of losing it.
-function sessionFor(state, sessionId) { return { freeSpins: null, ...(state.sessions[sessionId] ?? { credits: startingCredits }) }; }
+function sessionFor(state, sessionId) {
+  const session = { freeSpins: null, ...(state.sessions[sessionId] ?? { credits: startingCredits }) };
+  // A free-spin round left over from older rules (e.g. a bet size that no longer exists) cannot be played; drop it.
+  if (session.freeSpins && !isAllowedBet(session.freeSpins.bet)) session.freeSpins = null;
+  return session;
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -70,7 +75,7 @@ const server = createServer(async (req, res) => {
         if (session.credits < bet) return json(res, 400, { error: '演示积分不足。' });
       }
 
-      const outcome = spin(bet, randomInt, state.settings.maxWinMultiplier);
+      const outcome = spin(bet, randomInt, state.settings.maxWinMultiplier, free ? 'free' : 'base');
       session.credits += outcome.payout - (free ? 0 : bet);
       let freeSpinsFinished = null;
       if (free) {
@@ -93,6 +98,7 @@ const server = createServer(async (req, res) => {
         bet,
         stops: outcome.stops,
         grid: outcome.grid,
+        multipliers: outcome.multipliers,
         wins: outcome.wins,
         winningCells,
         payout: outcome.payout,

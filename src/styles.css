@@ -179,3 +179,8 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 @keyframes amount-pop { 50% { scale: 1.25; } }
 .big-win-hint { margin-top: .6cqw; font-size: 1.3cqw; color: #ffffffaa; }
 .toast.is-blocking { top: 40%; max-width: 70%; padding: 1.4cqw 2.4cqw; border-color: #ff8a8a; background: #3a0614f2; color: #ffe6e6; font-size: 1.7cqw; line-height: 1.6; text-align: center; z-index: 20; }
+
+/* Wild multiplier badge in free spins (set by useReels.showMultipliers). */
+.reel-slot[data-multiplier]::after { content: attr(data-multiplier); position: absolute; right: 6%; bottom: 6%; z-index: 2; padding: .1cqw .7cqw; border: .15cqw solid #fff3b0; border-radius: 1cqw; background: linear-gradient(#ff5a5a, #a3001b); color: #fff; font: 900 1.6cqw/1.2 Georgia, serif; text-shadow: 0 .1cqw 0 #5a0010; box-shadow: 0 0 .8cqw #ff3d3d; animation: badge-in .4s cubic-bezier(.2,1.6,.4,1) both; }
+@keyframes badge-in { from { scale: 0; } to { scale: 1; } }
+.rules-heading { margin: 14px 0 4px; font-size: 16px; color: #ffe39a; } .rules-list { margin: 0; padding-left: 20px; color: #e4d5ef; } .rules-list li { margin: 4px 0; }

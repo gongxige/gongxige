@@ -7,7 +7,8 @@ export const symbolName = (id: SymbolId) => SYMBOL_NAMES[id] ?? id;
 export function describeWin(win: Win): string {
   const amount = win.payout.toLocaleString('zh-CN');
   if (win.kind === 'scatter') return `金币 × ${win.count} = ${amount}`;
-  return `${symbolName(win.symbol)} ${win.reelCount} 连 × ${win.ways} 路 = ${amount}`;
+  const boosted = win.multipliedWays !== win.ways ? `（百搭加倍后 ${win.multipliedWays} 路）` : '';
+  return `${symbolName(win.symbol)} ${win.reelCount} 连 × ${win.ways} 路${boosted} = ${amount}`;
 }
 
 const cellKeys = (win: Win) => win.cells.map(({ row, reel }) => `${row}-${reel}`);

@@ -16,6 +16,7 @@ type SpinResult = {
   bet: number;
   stops: number[];
   grid: SymbolId[][];
+  multipliers?: number[][];
   wins: Win[];
   winningCells: string[];
   payout: number;
@@ -114,6 +115,7 @@ export default function App() {
       if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
       setWin({ amount: result.payout, bet: result.bet, wins: result.wins });
+      if (result.mode === 'free' && result.multipliers) reels.showMultipliers(result.multipliers);
       setFreeSpins(result.freeSpins ?? null);
       setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');

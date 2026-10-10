@@ -1,4 +1,4 @@
-import { BET_MULTIPLIER, FREE_SPINS_AWARD, FREE_SPINS_TRIGGER, REELS, SCATTER, WAYS_PAYTABLE, WAYS_SYMBOLS, WILD, WILD_REELS, scatterMultiplier, type Grid, type SymbolId, type WaysSymbol } from './symbols.ts';
+import { BET_MULTIPLIER, REELS, SCATTER, WAYS_PAYTABLE, WAYS_SYMBOLS, WILD, WILD_REELS, freeSpinsFor, minReels, scatterMultiplier, type Grid, type Mode, type MultiplierGrid, type ReelCount, type SymbolId, type WaysSymbol } from './symbols.ts';
 
 /** A grid position: reel (column) and row. */
 export type Cell = { reel: number; row: number };
@@ -6,10 +6,12 @@ export type Cell = { reel: number; row: number };
 export type WaysWin = {
   kind: 'ways';
   symbol: WaysSymbol;
-  /** Consecutive reels from the left that contain the symbol (3–5). */
-  reelCount: 3 | 4 | 5;
+  /** Consecutive reels from the left that contain the symbol (2–5). */
+  reelCount: ReelCount;
   /** Product of the symbol's count on each of those reels. */
   ways: number;
+  /** Ways after wild multipliers (free spins); equals `ways` when no multiplier applies. */
+  multipliedWays: number;
   payout: number;
   cells: Cell[];
 };
@@ -34,29 +36,37 @@ function cellsOf(grid: Grid, symbol: SymbolId, reels: number): Cell[] {
 }
 
 /**
- * 1024 ways: a symbol wins when it appears on reels 1..n (n ≥ 3) in any row.
- * Each combination of one position per reel is one way, so the number of
- * ways is the product of the symbol's count on each reel. Wilds on reels
- * 2–4 count as the symbol; reel 1 has no wilds, so every way starts with a
- * real symbol.
+ * 1024 ways: a symbol wins when it appears on reels 1..n in any row (n ≥ 3,
+ * or n ≥ 2 for the buffalo). Each combination of one position per reel is
+ * one way. Wilds on reels 2–4 count as the symbol; reel 1 has no wilds, so
+ * every way starts with a real symbol.
+ *
+ * In free spins each wild carries a multiplier and a way pays the product of
+ * the multipliers on it. Summed over all ways that is the product, per reel,
+ * of (real symbols + the multipliers of that reel's wilds).
  */
-export function evaluate(grid: Grid, bet: number): Evaluation {
+export function evaluate(grid: Grid, bet: number, mode: Mode = 'base', multipliers?: MultiplierGrid): Evaluation {
   if (bet % BET_MULTIPLIER !== 0) throw new Error(`Bet must be a multiple of ${BET_MULTIPLIER}`);
   const unit = bet / BET_MULTIPLIER;
+  const weight = (reel: number, row: number) => (grid[reel][row] === WILD && multipliers ? multipliers[reel][row] : 1);
   const wins: Win[] = [];
 
   for (const symbol of WAYS_SYMBOLS) {
     let ways = 1;
+    let multipliedWays = 1;
     let reelCount = 0;
     while (reelCount < REELS) {
-      const count = grid[reelCount].filter((id) => matches(id, symbol, reelCount)).length;
-      if (count === 0) break;
-      ways *= count;
+      const reel = reelCount;
+      const rows = [...grid[reel].keys()].filter((row) => matches(grid[reel][row], symbol, reel));
+      if (rows.length === 0) break;
+      ways *= rows.length;
+      multipliedWays *= rows.reduce((sum, row) => sum + weight(reel, row), 0);
       reelCount += 1;
     }
-    if (reelCount < 3) continue;
-    const n = reelCount as 3 | 4 | 5;
-    wins.push({ kind: 'ways', symbol, reelCount: n, ways, payout: WAYS_PAYTABLE[symbol][n] * ways * unit, cells: cellsOf(grid, symbol, n) });
+    const pay = WAYS_PAYTABLE[symbol][reelCount as ReelCount];
+    if (reelCount < minReels(symbol) || !pay) continue;
+    const n = reelCount as ReelCount;
+    wins.push({ kind: 'ways', symbol, reelCount: n, ways, multipliedWays, payout: pay * multipliedWays * unit, cells: cellsOf(grid, symbol, n) });
   }
 
   const scatterCells = cellsOf(grid, SCATTER, REELS);
@@ -66,6 +76,6 @@ export function evaluate(grid: Grid, bet: number): Evaluation {
   return {
     wins,
     payout: wins.reduce((sum, win) => sum + win.payout, 0),
-    freeSpinsAwarded: scatterCells.length >= FREE_SPINS_TRIGGER ? FREE_SPINS_AWARD : 0,
+    freeSpinsAwarded: freeSpinsFor(scatterCells.length, mode),
   };
 }

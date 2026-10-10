@@ -9,12 +9,12 @@ const pct = (value: number) => `${(value * 100).toFixed(2)}%`;
 
 const exact = computeRtp();
 console.log('理论 RTP（精确计算）');
-console.log('  单局（付费或免费）各符号贡献：');
+console.log('  付费旋转本身，各符号贡献：');
 for (const [symbol, value] of Object.entries(exact.bySymbol).sort((a, b) => b[1] - a[1])) {
   console.log(`    ${symbol.padEnd(9)} ${pct(value)}`);
 }
-console.log(`  单局合计   ${pct(exact.perSpin)}`);
-console.log(`  免费游戏   ${pct(exact.freeSpins)}（触发率 1/${(1 / exact.triggerRate).toFixed(0)}，每次触发平均 ${exact.freeSpinsPerTrigger.toFixed(2)} 局）`);
+console.log(`  付费旋转   ${pct(exact.basePerSpin)}`);
+console.log(`  免费游戏   ${pct(exact.freeSpins)}（每局免费游戏 ${pct(exact.freePerSpin)}；触发率 1/${(1 / exact.triggerRate).toFixed(0)}，每次触发平均 ${exact.freeSpinsPerTrigger.toFixed(2)} 局，每局平均再加 ${exact.retriggerRate.toFixed(3)} 局）`);
 console.log(`  总 RTP     ${pct(exact.total)}`);
 
 const rounds = Number(process.argv[2] ?? 1_000_000);
