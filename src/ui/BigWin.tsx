@@ -32,15 +32,19 @@ export function BigWin({ amount, bet, onDone }: Props) {
 
   useEffect(() => {
     const start = performance.now();
-    let frame = requestAnimationFrame(function step(now) {
-      // In a hidden tab there is nothing to watch: go straight to the total.
-      const u = skip.current || document.hidden ? 1 : Math.min((now - start) / finalTier.countMs, 1);
+    let frame = 0;
+    let timer = 0;
+    const step = (now: number) => {
+      const u = skip.current ? 1 : Math.min((now - start) / finalTier.countMs, 1);
       // Mostly linear so the title visibly climbs; eases only at the very end.
       setValue(Math.round(amount * (u < 0.85 ? u * 0.94 / 0.85 : 0.94 + 0.06 * (1 - (1 - (u - 0.85) / 0.15) ** 2))));
-      if (u < 1) frame = requestAnimationFrame(step);
-      else setCounting(false);
-    });
-    return () => cancelAnimationFrame(frame);
+      if (u >= 1) { setCounting(false); return; }
+      // Hidden tabs get no animation frames; a timer keeps the count on real time.
+      if (document.hidden) timer = window.setTimeout(() => step(performance.now()), 100);
+      else frame = requestAnimationFrame(step);
+    };
+    step(start);
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
   }, [amount, finalTier.countMs]);
 
   useEffect(() => {
