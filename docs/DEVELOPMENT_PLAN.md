@@ -111,8 +111,9 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 
 ```bash
 npm install          # 安装依赖
-npm run api          # 启动本机测试服（默认 8787 端口）
-npm run dev          # 启动网页（默认 http://127.0.0.1:4173）
+npm start            # 同时启动本机测试服（8787）和网页（http://127.0.0.1:4173），Ctrl+C 一起停
+npm run api          # 只启动本机测试服（默认 8787 端口）
+npm run dev          # 只启动网页（默认 http://127.0.0.1:4173）
 npm test             # 运行引擎单元测试
 npm run rtp          # 打印精确 RTP + 100 万次模拟
 npm run build        # 类型检查 + 打包
@@ -120,4 +121,4 @@ npm run build        # 类型检查 + 打包
 
 端口可以用环境变量改：`API_PORT`、`WEB_PORT`。
 
-**改了 `src/engine/` 或 `server.mjs` 之后必须重启 `npm run api`**（Node 只在启动时加载一次规则）。忘了重启时，网页会提示"旧版本"并禁止旋转。
+**改了 `src/engine/` 或 `server.mjs` 之后必须重启 API（Ctrl+C 后重新 `npm start`）**（Node 只在启动时加载一次规则）。忘了重启时，网页会提示"旧版本"并禁止旋转。

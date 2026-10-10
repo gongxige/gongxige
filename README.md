@@ -9,9 +9,13 @@
 
 ```bash
 npm install
-npm run api   # 终端 1：本机测试服
-npm run dev   # 终端 2：打开 http://127.0.0.1:4173
+npm start     # 一条命令同时启动本机测试服（API）和网页，然后打开 http://127.0.0.1:4173
 ```
+
+- 按 Ctrl+C 两个一起停止。
+- 已经有最新版本在运行时会直接复用，重复运行不会冲突；如果端口被旧版本 API 占着，会给出关闭它的命令。
+- 改了 `src/engine/` 或 `server.mjs` 后，要先 Ctrl+C 再 `npm start`，API 才会用上新规则。
+- 也可以分开启动：`npm run api` 和 `npm run dev`。
 
 ## 目录
 
