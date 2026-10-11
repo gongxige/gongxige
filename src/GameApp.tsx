@@ -227,7 +227,7 @@ export default function GameApp() {
       )}
       {roundId && <div className="round-id" title="把局号发给平台或客服，可以查到这一局的回放">局号<span>{roundId}</span></div>}
       {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
-      {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href={config?.lobbyUrl ?? 'http://127.0.0.1:8788'}>打开平台大厅</a></div>}
+      {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href="/">打开平台大厅</a></div>}
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
       <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>

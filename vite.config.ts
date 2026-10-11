@@ -10,6 +10,8 @@ export default defineConfig({
     host: '127.0.0.1',
     port: Number(process.env.WEB_PORT ?? 4173),
     strictPort: true,
+    // Allow a temporary Cloudflare quick tunnel (https://xxx.trycloudflare.com) to show this site to someone remote.
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       // The game provider owns only its browser game API. Player-facing
       // wallets and game-history APIs belong to the platform service.
