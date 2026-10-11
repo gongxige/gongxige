@@ -5,6 +5,8 @@
   - 不跳步，不提前做后面步骤的内容，不改与这一步无关的文件。
   - 如果提示里附了上一次的审计意见，必须逐条处理；不同意某条就在最后的总结里说明理由。
 - **不要运行 `git commit`、`git reset`、`git checkout`、`git rebase`、`git push` 等改变 Git 历史的命令**。脚本会在你完成后统一提交，并打标签。可以用 `git diff`、`git status`、`git log` 查看。
+- **只在本项目文件夹里工作**：不要读写项目文件夹以外的文件，不要安装全局软件，不要改系统设置。
+- **不要使用电脑操作（computer use）、浏览器控制等会动用户鼠标键盘或桌面的工具**；需要运行命令就用终端。命令跑不起来就在总结里说明，交给审计处理。
 - 不要修改：`docs/audits/`、`docs/workflow/`、`docs/WORKFLOW_PLAN.md`、`scripts/autopilot.mjs`、`AGENTS.md`。这些属于流程本身。
 - 游戏规则只在 `src/engine/`，必须保持纯逻辑（不依赖 React、DOM、Node API）；本阶段**不改** `src/engine/`。
 - `reference/` 是本机参考素材，不进 Git，也不要在运行时代码里引用。

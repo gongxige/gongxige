@@ -14,7 +14,8 @@
 // 可调的环境变量：
 //   AUTOPILOT_CODEX         启动 Codex 的命令（默认 codex）
 //   AUTOPILOT_CLAUDE        启动 Claude Code 的命令（默认 claude）
-//   AUTOPILOT_CODEX_ARGS    传给 codex 的参数（默认 exec --sandbox workspace-write -o .autopilot/codex-last.txt -）
+//   AUTOPILOT_CODEX_SANDBOX Codex 沙箱模式（Windows 默认 danger-full-access，其他系统 workspace-write）
+//   AUTOPILOT_CODEX_ARGS    传给 codex 的全部参数（设置后上一项无效）
 //   AUTOPILOT_MAX_ATTEMPTS  同一步最多尝试几次（默认 4）
 //   AUTOPILOT_ONLY_STEP     只跑到这一步为止（例如 STEP-03），方便先试一两步
 
@@ -33,7 +34,10 @@ const ONLY_STEP = process.env.AUTOPILOT_ONLY_STEP ?? null;
 const CODEX = process.env.AUTOPILOT_CODEX ?? 'codex';
 const CLAUDE = process.env.AUTOPILOT_CLAUDE ?? 'claude';
 const CODEX_LAST = `${WORK}/codex-last.txt`;
-const CODEX_ARGS = process.env.AUTOPILOT_CODEX_ARGS ?? `exec --sandbox workspace-write -o ${CODEX_LAST} -`;
+// Codex's Windows sandbox cannot start processes on some machines ("helper_unknown_error: setup refresh
+// had errors"), so on Windows Codex runs without its sandbox; AGENTS.md limits what it may do.
+const CODEX_SANDBOX = process.env.AUTOPILOT_CODEX_SANDBOX ?? (process.platform === 'win32' ? 'danger-full-access' : 'workspace-write');
+const CODEX_ARGS = process.env.AUTOPILOT_CODEX_ARGS ?? `exec --sandbox ${CODEX_SANDBOX} -o ${CODEX_LAST} -`;
 // The auditor may read and run checks, nothing else. dontAsk denies everything not listed here.
 const AUDIT_TOOLS = ['Read', 'Grep', 'Glob', 'Bash(npm test *)', 'Bash(npm test)', 'Bash(npm run *)', 'Bash(node --test *)', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)', 'Bash(git status *)', 'Bash(git status)'].join(',');
 const CLAUDE_ARGS = `-p --output-format json --permission-mode dontAsk --allowedTools "${AUDIT_TOOLS}"`;
