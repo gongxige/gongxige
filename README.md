@@ -7,6 +7,13 @@
 - 开发计划与进度：[docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)
 - 开发日志：[docs/DEVLOG.md](docs/DEVLOG.md)
 
+## 两款游戏
+
+- **Wild Frontier**：5 × 4、1024 Ways 的非洲草原老虎机，理论 RTP 96.41%（`npm run rtp`）。规则在 `src/engine/`。
+- **麻将连连胡**（Mahjong Cascade）：5 列 4-5-5-5-4 格、2,000 种赢法的麻将消除老虎机。中奖的牌消除、上方落下补牌可以连锁，同一次旋转第 1~4 次中奖 ×1/×2/×3/×5（免费旋转 ×2/×4/×6/×10）；中间三列的金色牌中奖后变百搭；3 个以上"胡"送 10 次免费旋转（每多 1 个 +2 次）；最高赢分 1,708 倍。RTP 96.95%（1,000 万局模拟，`npm run rtp:mahjong`，详见 [docs/MAHJONG_MATH.md](docs/MAHJONG_MATH.md)）。规则在 `src/mahjong/engine/`，设计见 [docs/MAHJONG_DESIGN.md](docs/MAHJONG_DESIGN.md)。牌面、界面全部用 SVG / CSS 自己画，只借鉴玩法，不使用任何参考游戏的名字、图片或代码。目前投注固定为 10,000 积分一局。
+
+两款游戏都从玩家网站的大厅进入，走同一套钱包；后台的游戏记录、回放和概览会区分两款游戏。
+
 ## 运行
 
 建议使用 Node.js 24（平台数据库用的是 Node 内置的 `node:sqlite`）。
@@ -43,9 +50,10 @@ npm run admin:password
 npm test                 # 单元测试和接口测试
 npm run build            # TypeScript 检查 + 生产构建
 npm run check:provider   # 供应商端到端：签名、去重、连转对账、回放、派彩故障、扣款超时、余额不足
-npm run check:platform   # 平台端到端：注册 → 充值申请 → 后台通过 → 玩 50 局 → 提现 → 后台通过 → 对账一致，
+npm run check:platform   # 平台端到端：注册 → 充值申请 → 后台通过 → 玩 50 局 → 提现 → 后台通过 → 对账一致（Wild Frontier 和麻将连连胡各一遍，麻将含免费旋转），
                          # 另测余额不足不能提现、冻结金额不能下注、同一提现不能通过两次、同时 20 次下注不会扣成负数
-npm run rtp              # 返奖率报告（改了 src/engine/ 后运行）
+npm run rtp              # Wild Frontier 返奖率报告（改了 src/engine/ 后运行）
+npm run rtp:mahjong      # 麻将连连胡 RTP 模拟（默认 1,000 万局，约十几分钟；可加次数：npm run rtp:mahjong -- 1000000）
 ```
 
 两个端到端检查都用临时端口和临时数据，不影响你的存档。
@@ -68,7 +76,8 @@ npm run autopilot
 ## 目录
 
 ```
-src/engine/        游戏规则（纯逻辑 + 单元测试）
+src/engine/        Wild Frontier 游戏规则（纯逻辑 + 单元测试）
+src/mahjong/       麻将连连胡：engine/ 规则（纯逻辑 + 单元测试），MahjongApp.tsx 游戏页面，MahjongTile.tsx SVG 牌面
 src/               React 界面：App.tsx 玩家网站，GameApp.tsx 游戏，admin/ 管理后台，ui/ 与 game/ 为游戏界面和转动逻辑
 src/platform/      平台的接口测试
 server.mjs         游戏服务器（供应商）：出结果、记录每一局、调平台钱包

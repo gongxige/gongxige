@@ -144,7 +144,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] STEP-22 转速调快到每秒约 17 格，一局约 2.2 秒停完（2026-10-12，Claude Code 人工开发模式）
 - [ ] 以后：后台"游戏管理"（游戏列表、上架/下架、维护模式、投注设置、按游戏统计；RTP 只显示不可改）
 
-### 阶段 9：第二款游戏「麻将连连胡」 ⏳ 自动开发中
+### 阶段 9：第二款游戏「麻将连连胡」 ✅
 
 需求见 [MAHJONG_TASK.md](MAHJONG_TASK.md)。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-23 ~ STEP-31 由 `npm run autopilot` 自动开发，进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
@@ -156,7 +156,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] STEP-28 麻将连连胡游戏画面：SVG 自绘牌面、4-5-5-5-4 盘面、余额/投注/赢分、旋转、规则与赔付；手机铺满并自动转横（2026-10-12，Claude Code 人工开发模式）
 - [x] STEP-29 麻将连连胡动画：按服务器连锁步骤逐段播放高亮/消除/落下，倍数条、金色翻成百搭、免费旋转与大奖画面；单元测试逐段核对 3,000 局（2026-10-12，Claude Code 人工开发模式）
 - [x] STEP-30 接入平台：大厅两张游戏卡片、POST /games/:gameId/launch、玩家/后台游戏记录显示游戏名、后台概览按游戏统计；测试覆盖玩家只能看到自己的麻将记录（2026-10-12，Claude Code 人工开发模式）
-- [ ] STEP-31 端到端检查和收尾
+- [x] STEP-31 端到端检查和收尾：check:platform 增加麻将连连胡整套流程（含免费旋转），README 增加两款游戏说明；rtp:mahjong 1,000 万局 RTP 96.9489% 与数学文档一致（2026-10-12，Claude Code 人工开发模式）
 
 ## 四、重要决定记录
 
