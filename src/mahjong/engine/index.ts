@@ -31,26 +31,31 @@ const paidSymbols: readonly PaidSymbolId[] = ['FA', 'ZHONG', 'BAI', 'WAN8', 'DOT
 function createStrip(seed: number, reel: number): readonly Token[] {
   let state = seed >>> 0;
   const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state; };
+  const order = [...paidSymbols];
+  for (let index = order.length - 1; index > 0; index -= 1) {
+    const swap = next() % (index + 1);
+    [order[index], order[swap]] = [order[swap], order[index]];
+  }
   return Array.from({ length: 100 }, (_, index) => {
     // 每轴两张胡；中间三轴另有五张金色普通牌。
     if (index % 50 === (seed % 50)) return { symbolId: 'HU' };
-    const token: Token = { symbolId: paidSymbols[next() % paidSymbols.length] };
+    const token: Token = { symbolId: order[Math.floor(index / 2) % order.length] };
     return reel >= 1 && reel <= 3 && index % 20 === (seed % 20) ? { ...token, golden: true } : token;
   });
 }
 export const MAHJONG_MATH_CONFIG: MahjongMathConfig = {
-  version: 'mahjong-math-1.1.0', stripRevision: 'mahjong-strips-1.1.0',
+  version: 'mahjong-math-1.2.0', stripRevision: 'mahjong-strips-1.2.0',
   strips: [createStrip(0x1a2b3c01, 0), createStrip(0x1a2b3c02, 1), createStrip(0x1a2b3c03, 2), createStrip(0x1a2b3c04, 3), createStrip(0x1a2b3c05, 4)],
   payTable: {
-    FA: { 3: { numerator: 705, denominator: 10_000 }, 4: { numerator: 2_115, denominator: 10_000 }, 5: { numerator: 8_460, denominator: 10_000 } },
-    ZHONG: { 3: { numerator: 705, denominator: 10_000 }, 4: { numerator: 2_115, denominator: 10_000 }, 5: { numerator: 8_460, denominator: 10_000 } },
-    BAI: { 3: { numerator: 705, denominator: 10_000 }, 4: { numerator: 2_115, denominator: 10_000 }, 5: { numerator: 8_460, denominator: 10_000 } },
-    WAN8: { 3: { numerator: 705, denominator: 10_000 }, 4: { numerator: 2_115, denominator: 10_000 }, 5: { numerator: 8_460, denominator: 10_000 } },
-    DOT1: { 3: { numerator: 5, denominator: 100 }, 4: { numerator: 15, denominator: 100 }, 5: { numerator: 60, denominator: 100 } },
-    DOT2: { 3: { numerator: 1, denominator: 10_000 }, 4: { numerator: 3, denominator: 10_000 }, 5: { numerator: 12, denominator: 10_000 } },
-    DOT3: { 3: { numerator: 1, denominator: 10_000 }, 4: { numerator: 3, denominator: 10_000 }, 5: { numerator: 12, denominator: 10_000 } },
-    BAM1: { 3: { numerator: 1, denominator: 10_000 }, 4: { numerator: 3, denominator: 10_000 }, 5: { numerator: 12, denominator: 10_000 } },
-    BAM2: { 3: { numerator: 1, denominator: 10_000 }, 4: { numerator: 3, denominator: 10_000 }, 5: { numerator: 12, denominator: 10_000 } },
+    FA: { 3: { numerator: 1_097, denominator: 10_000 }, 4: { numerator: 3_292, denominator: 10_000 }, 5: { numerator: 13_165, denominator: 10_000 } },
+    ZHONG: { 3: { numerator: 1_097, denominator: 10_000 }, 4: { numerator: 3_292, denominator: 10_000 }, 5: { numerator: 13_165, denominator: 10_000 } },
+    BAI: { 3: { numerator: 1_097, denominator: 10_000 }, 4: { numerator: 3_292, denominator: 10_000 }, 5: { numerator: 13_165, denominator: 10_000 } },
+    WAN8: { 3: { numerator: 1_097, denominator: 10_000 }, 4: { numerator: 3_292, denominator: 10_000 }, 5: { numerator: 13_165, denominator: 10_000 } },
+    DOT1: { 3: { numerator: 778, denominator: 10_000 }, 4: { numerator: 2_332, denominator: 10_000 }, 5: { numerator: 9_339, denominator: 10_000 } },
+    DOT2: { 3: { numerator: 2, denominator: 10_000 }, 4: { numerator: 5, denominator: 10_000 }, 5: { numerator: 18, denominator: 10_000 } },
+    DOT3: { 3: { numerator: 2, denominator: 10_000 }, 4: { numerator: 5, denominator: 10_000 }, 5: { numerator: 18, denominator: 10_000 } },
+    BAM1: { 3: { numerator: 2, denominator: 10_000 }, 4: { numerator: 5, denominator: 10_000 }, 5: { numerator: 18, denominator: 10_000 } },
+    BAM2: { 3: { numerator: 2, denominator: 10_000 }, 4: { numerator: 5, denominator: 10_000 }, 5: { numerator: 18, denominator: 10_000 } },
   },
 };
 export const TEMPORARY_STRIPS = MAHJONG_MATH_CONFIG.strips;
