@@ -1,5 +1,21 @@
 # 开发日志
 
+## 2026-10-11 · STEP-11 端到端检查和收尾（Claude Code 人工开发模式）
+
+**做了什么**
+
+- `scripts/platform-check.mjs`（`npm run check:platform`）：在临时端口、临时数据目录、随机管理员密码下启动平台服务和游戏服务器，然后：注册新玩家（10,000）→ 充值申请 5,000，未审核不到账，后台通过后到账、再通过 409 → 经 `/games/wild-frontier/launch` 拿 token 玩 50 局，每局余额 = −投注 + 赢分，与平台余额一致，后台游戏记录正好 50 局 → 提现 1,000 立即冻结，同时发 3 次通过只成功 1 次，之后通过/拒绝都 409 → 对账：钱包 = 全部流水之和，所有玩家一致 → 超过可用余额的提现 400 且余额不变 → 冻结到只剩 40 时下注 80 被拒（402），拒绝提现后冻结全部退回 → 余额调到 500 后同时发 20 笔 80 的签名下注，正好成功 6 笔、剩 20，再同时 20 次转动后余额仍 ≥ 0，对账一致。
+- `scripts/start.mjs`：结束时打印玩家网站 `http://127.0.0.1:4173/`、管理后台 `/admin`，说明初始密码在终端"[平台] 首次启动"那一行、忘了用 `npm run admin:password`。
+- `scripts/admin-password.mjs`（`npm run admin:password`）：给 `admin` 重新生成随机密码（没有管理员就创建），清除登录锁定，打印一次。
+- `package.json`：新增 `check:platform`、`admin:password`、`platform`。
+- `README.md`：重写运行说明（两个网址、管理员密码在哪看、数据存在哪、分开启动、旧 mock-operator 的定位）、检查命令、自动开发的人工模式、目录。
+
+**怎么验证的**：`npm run build` 通过；`npm test` 61/61 通过；`npm run check:provider` 通过；`npm run check:platform` 连续运行两次都全部通过。用临时端口和临时数据跑 `scripts/start.mjs`：三个服务都启动，打印两个网址和"[平台] 首次启动：…初始密码"，`/admin` 返回 200，停止后端口全部释放。`admin:password` 在临时数据上实测：新密码登录 200，旧密码 401。
+
+**遗留问题**：`docs/CLOUD_DEPLOY_TASK.md` 里"保护 `/api/rounds/*`、`/api/replay/*`"一条已不需要（接口已在 STEP-08 删除）；会话保存在内存，平台服务重启后玩家和管理员都要重新登录。
+
+---
+
 ## 2026-10-11 · STEP-10 后台：审核、流水、游戏记录、对账、故障模拟（Claude Code 人工开发模式）
 
 **做了什么**

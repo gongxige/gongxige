@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node scripts/start.mjs",
     "dev": "vite",
+    "platform": "node platform-server.mjs",
     "api": "node server.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -16,6 +17,8 @@
     "rtp": "node scripts/rtp-report.ts",
     "operator": "node mock-operator.mjs",
     "check:provider": "node scripts/provider-check.mjs",
+    "check:platform": "node scripts/platform-check.mjs",
+    "admin:password": "node scripts/admin-password.mjs",
     "autopilot": "node scripts/autopilot.mjs"
   },
   "dependencies": {

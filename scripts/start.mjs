@@ -84,6 +84,7 @@ if (await get(WEB_URL)) {
   run('web', ['node_modules/vite/bin/vite.js']);
 }
 
-console.log(`\n平台大厅：${LOBBY_URL}    ← 从这里选玩家、点"进入游戏"`);
-console.log(`（游戏网页 ${WEB_URL} 需要平台给的 token，直接打开会提示回大厅）    按 Ctrl+C 停止\n`);
+console.log(`\n玩家网站：${WEB_URL}/        ← 注册、登录、充值提现、进入游戏`);
+console.log(`管理后台：${WEB_URL}/admin   ← 用户名 admin；第一次启动时初始密码打印在终端"[平台] 首次启动"那一行（只出现一次）`);
+console.log(`（忘了管理员密码：运行 npm run admin:password 重新生成）    按 Ctrl+C 停止\n`);
 if (children.length === 0) process.exit(0);
