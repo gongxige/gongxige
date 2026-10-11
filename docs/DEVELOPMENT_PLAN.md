@@ -117,6 +117,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] 自动接力流程：`scripts/autopilot.mjs`、`AGENTS.md`（Codex 规则）、`docs/workflow/AUDITOR.md`（审计规则）
 - [x] STEP-01 阶段 6 收尾：第 5 次已实际运行 `npm run build`、`npm test`、`npm run check:provider`，三项均通过；无需修改阶段 6 代码（2026-10-11）
 - [x] STEP-02 平台设计文档：完成页面、`node:sqlite` 数据模型、账本/幂等/对账、接口及目录设计；`npm test` 通过（2026-10-11）
+- [x] STEP-03 平台数据库和记账核心：完成 `node:sqlite` 建表、玩家/钱包/申请/流水核心与临时数据库单测，覆盖非负余额、冻结下注限制、交易幂等、提现单次审批和对账（2026-10-11）
 
 ## 四、重要决定记录
 
