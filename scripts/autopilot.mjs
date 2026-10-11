@@ -159,9 +159,11 @@ function parseAudit(stdout) {
   return { text: String(text).trim(), verdict: verdicts.length ? verdicts.at(-1)[1] : null };
 }
 
-// Signs that Codex could not run any command at all: its runtime is broken, not the code.
-const CODEX_ENV_ERRORS = /helper_unknown_error|Failed to create unified exec process/g;
-/** True if Codex's output reports an environment failure. Codex echoes its prompt, which may quote earlier reports, so only extra occurrences count. */
+// Signs that Codex could not run any command at all: its runtime is broken, not the code. Only Codex's own
+// error log line counts ("<time>Z ERROR codex_core::tools::router: error=exec_command failed: ... helper_unknown_error"),
+// because docs and files that Codex reads may mention the same words.
+const CODEX_ENV_ERRORS = /^\S+\s+ERROR codex_core::tools::router: error=exec_command failed:.*(helper_unknown_error|Failed to create unified exec process)/gm;
+/** True if Codex's output reports an environment failure. Codex echoes its prompt, which may quote earlier logs, so only extra occurrences count. */
 function codexEnvBroken(output, prompt) {
   const count = (text) => (String(text).match(CODEX_ENV_ERRORS) ?? []).length;
   return count(output) > count(prompt);
