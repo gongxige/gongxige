@@ -1,5 +1,23 @@
 # 开发日志
 
+## 2026-10-11 · STEP-09 后台：管理员、概览、玩家管理、操作日志（Claude Code 人工开发模式）
+
+**做了什么**
+
+- 数据库（`server/platform/schema.mjs`）：新增 `admins`（独立于玩家，scrypt 加盐哈希、连续输错锁定）和 `admin_audit_logs`。
+- `server/platform/admin.mjs`：首次启动没有管理员时创建 `admin` 并生成随机密码（`platform-server.mjs` 只在终端打印这一次；设置 `ADMIN_PASSWORD` 时用它代替，供测试和检查脚本用）；管理员登录/退出（写操作日志）；概览（玩家数、今日充值到账/提现完成、今日下注（不含已回滚）、今日派彩、平台盈亏 = 下注 − 派彩，"今日"按本机日期）；玩家列表/搜索（用户名或编号，转义 LIKE 通配符）、玩家详情（钱包、对账是否一致、最近 100 条流水）；操作日志列表。
+- `server/platform/ledger.mjs`：`manualAdjustment`（非零整数、原因必填且 ≤200 字；改余额、写 `manual_adjustment` 流水、写操作日志在同一事务；扣减用"余额足够才更新"，不会变负）、`setPlayerStatus`（冻结/解冻 + 操作日志同一事务）。
+- `platform-server.mjs`：`/api/admin/*` 接口（登录、退出、me、overview、players、players/:id、freeze、unfreeze、adjustment、audit-logs），全部要求独立的 `admin_session` cookie（httpOnly、SameSite=Strict），玩家 cookie 无效；旧的 `/admin/state`、`/admin/fault` 也改为要求管理员会话；冻结的玩家立即视为未登录（钱包、进游戏、记录都不能用），下注本来就会被拒绝；玩家资金记录里显示"后台调整"。修复：后台路由少了 `await` 时，错误密码会让整个服务崩溃。
+- 前端：`src/admin/AdminApp.tsx`（`/admin` 页面：登录、概览、玩家管理、操作日志；顶部固定演示提示；手机可用），`vite.config.ts` 增加 `/api/admin` 代理，`src/styles.css` 增加后台样式。
+- `scripts/provider-check.mjs`：用随机 `ADMIN_PASSWORD` 启动平台、以管理员登录后再调 `/admin/state`、`/admin/fault`，并断言未登录时 401。
+- 测试 `src/platform/admin.test.ts`：首次启动打印随机密码且能登录；玩家密码不能登录后台；11 个后台接口在未登录和玩家 cookie 下都返回 401；搜索/详情；调整必须有原因、不能扣成负数、出现在后台流水/玩家资金记录/操作日志且对账一致；冻结后玩家立即失效且不能登录、解冻恢复；概览字段；退出后 cookie 失效。
+
+**怎么验证的**：`npm run build` 通过；`npm test` 53/53 通过；`npm run check:provider` 全部通过。浏览器实测（临时端口 8807/8808/4193 + 临时数据目录）：终端打印的初始密码登录 `/admin` → 概览显示 2 个玩家、今日充值 20,000 → 玩家一 +500（原因"浏览器测试补偿"）后余额 10,500、流水出现"后台调整" → 冻结 → 操作日志依次显示登录、调整余额 +500、冻结玩家及原因；手机宽度显示正常。
+
+**遗留问题**：管理员和玩家会话仍保存在内存里，平台服务重启后需要重新登录；充值/提现审核、全量流水、游戏记录、对账、故障模拟页面属于 STEP-10。
+
+---
+
 ## 2026-10-11 · STEP-08 修复 check:provider 回归（Claude Code 介入，Codex 额度用完期间）
 
 **问题**：第 2 次审计打回——第 2 次改动删除了公开的 `GET /api/rounds/{id}`、`GET /api/replay/{id}`（为了不让玩家按局号看到别人的记录），但 `npm run check:provider`、`docs/PROVIDER_API.md` 和模拟平台 `mock-operator.mjs` 的流水链接还在用旧接口，导致检查失败。

@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,18 +19,26 @@ const OP_PORT = 18_000 + (process.pid % 1_000) * 2;
 const API_PORT = OP_PORT + 1;
 const OP = `http://127.0.0.1:${OP_PORT}`;
 const API = `http://127.0.0.1:${API_PORT}`;
-const env = { ...process.env, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', SLOW_BET_MS: '3500' };
+const ADMIN_PASSWORD = randomBytes(12).toString('base64url');
+const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', SLOW_BET_MS: '3500' };
 const children = [spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
 process.on('exit', () => children.forEach((c) => c.kill()));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const getJson = async (url, init) => { const r = await fetch(url, init); return { status: r.status, body: await r.json().catch(() => ({})) }; };
 const spinOnce = (token, bet) => getJson(`${API}/api/spin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, bet }) });
-const opState = async () => (await getJson(`${OP}/admin/state`)).body;
-const setFault = (kind) => fetch(`${OP}/admin/fault`, { method: 'POST', body: new URLSearchParams({ kind }), redirect: 'manual' });
+let adminCookie = '';
+const opState = async () => (await getJson(`${OP}/admin/state`, { headers: { cookie: adminCookie } })).body;
+const setFault = (kind) => fetch(`${OP}/admin/fault`, { method: 'POST', headers: { cookie: adminCookie }, body: new URLSearchParams({ kind }), redirect: 'manual' });
 const step = (text) => console.log(`✓ ${text}`);
 
 for (let i = 0; i < 50; i += 1) { if ((await getJson(`${API}/api/health`).catch(() => null))?.status === 200 && (await getJson(`${OP}/health`).catch(() => null))?.status === 200) break; await sleep(200); }
+
+// The back-office hooks used below need an admin session.
+assert.equal((await getJson(`${OP}/admin/state`)).status, 401);
+const adminLogin = await fetch(`${OP}/api/admin/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: ADMIN_PASSWORD }) });
+assert.equal(adminLogin.status, 200);
+adminCookie = adminLogin.headers.get('set-cookie').split(';')[0];
 
 // Launch: the platform signs and calls the game server, then redirects the player.
 const launched = await fetch(`${OP}/launch?player=player-002`, { redirect: 'manual' });

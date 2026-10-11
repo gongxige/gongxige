@@ -5,9 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { json, html, parseJson, readRaw, signedPost, verify } from './server/http.mjs';
 import { openPlatformDatabase } from './server/platform/db.mjs';
-import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, placeBet, reconcilePlayer, refundBet } from './server/platform/ledger.mjs';
+import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, manualAdjustment, placeBet, reconcilePlayer, refundBet, setPlayerStatus } from './server/platform/ledger.mjs';
 import { authenticatePlayer, changePassword, createSessionStore, registerPlayer } from './server/platform/auth.mjs';
 import { replayPage } from './server/replay-page.mjs';
+import { authenticateAdmin, ensureInitialAdmin, getAdmin, listAuditLogs, listPlayers, overview, playerDetail, recordAdminLogout } from './server/platform/admin.mjs';
 
 export const PLATFORM_PROTOCOL = 'provider-v1';
 const port = Number(process.env.OPERATOR_PORT ?? 8788);
@@ -17,6 +18,10 @@ const providerUrl = process.env.PROVIDER_URL ?? `http://127.0.0.1:${process.env.
 const gameWebUrl = process.env.GAME_WEB_URL ?? `http://127.0.0.1:${process.env.WEB_PORT ?? 4173}`;
 const db = openPlatformDatabase(join(process.env.DATA_DIR ?? join(process.cwd(), 'data'), process.env.PLATFORM_DB_FILE ?? 'platform.sqlite'));
 const sessions = createSessionStore();
+const adminSessions = createSessionStore();
+// First start with no admin: create one and print its random password once.
+const initialAdminPassword = await ensureInitialAdmin(db, { password: process.env.ADMIN_PASSWORD || undefined });
+if (initialAdminPassword) console.log(`首次启动：已创建管理员账号 admin，初始密码 ${initialAdminPassword}（只显示这一次，请记下来）`);
 
 function seedPlayer(id, username, amount) {
   if (db.prepare('SELECT id FROM players WHERE id = ?').get(id)) return;
@@ -39,8 +44,14 @@ const setSessionCookie = (res, token) => res.setHeader('set-cookie', `platform_s
 const clearSessionCookie = (res) => res.setHeader('set-cookie', 'platform_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
 function currentPlayer(req) {
   const id = sessions.get(cookieValue(req, 'platform_session'));
-  return id ? db.prepare('SELECT id, username, status FROM players WHERE id = ?').get(id) : null;
+  const player = id ? db.prepare('SELECT id, username, status FROM players WHERE id = ?').get(id) : null;
+  // A frozen player is logged out everywhere: no wallet, no game launch, no records.
+  return player?.status === 'active' ? player : null;
 }
+// Admin sessions use their own cookie and store; a player cookie never counts as an admin.
+const setAdminCookie = (res, token) => res.setHeader('set-cookie', `admin_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800`);
+const clearAdminCookie = (res) => res.setHeader('set-cookie', 'admin_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+const currentAdmin = (req) => { const id = adminSessions.get(cookieValue(req, 'admin_session')); return id ? getAdmin(db, id) : null; };
 
 function walletRecords(playerId) {
   const requests = db.prepare(`SELECT 'deposit' AS kind, amount, status, created_at AS createdAt
@@ -48,9 +59,9 @@ function walletRecords(playerId) {
     UNION ALL
     SELECT 'withdrawal' AS kind, amount, status, created_at AS createdAt
     FROM withdrawal_requests WHERE player_id = ?`).all(playerId, playerId);
-  const entries = db.prepare(`SELECT kind, amount, status, created_at AS createdAt
+  const entries = db.prepare(`SELECT kind, CASE WHEN kind = 'manual_adjustment' THEN balance_delta ELSE amount END AS amount, status, created_at AS createdAt
     FROM ledger_entries WHERE player_id = ?
-      AND kind IN ('bet', 'win', 'refund')`).all(playerId);
+      AND kind IN ('bet', 'win', 'refund', 'manual_adjustment')`).all(playerId);
   return [...requests, ...entries].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
@@ -121,6 +132,40 @@ async function createLaunch(playerId) {
 
 async function providerRounds(playerId, roundId) {
   return signedPost(`${providerUrl}/provider/rounds`, { playerId, ...(roundId ? { roundId } : {}) }, { secret, operatorId });
+}
+
+/** /api/admin/*: every route except login needs an admin session. */
+async function adminApi(req, res, url) {
+  const path = url.pathname.slice('/api/admin'.length);
+  if (req.method === 'POST' && path === '/auth/login') {
+    const admin = await authenticateAdmin(db, parseJson(await readRaw(req)));
+    setAdminCookie(res, adminSessions.create(admin.id));
+    return json(res, 200, { admin });
+  }
+  const admin = currentAdmin(req);
+  if (!admin) return fail(res, 401, 'ADMIN_UNAUTHENTICATED', '请先以管理员身份登录');
+  if (req.method === 'POST' && path === '/auth/logout') {
+    recordAdminLogout(db, admin.id);
+    adminSessions.delete(cookieValue(req, 'admin_session'));
+    clearAdminCookie(res);
+    return json(res, 200, { ok: true });
+  }
+  if (req.method === 'GET' && path === '/auth/me') return json(res, 200, { admin });
+  if (req.method === 'GET' && path === '/overview') return json(res, 200, overview(db));
+  if (req.method === 'GET' && path === '/players') return json(res, 200, { players: listPlayers(db, { query: url.searchParams.get('q') ?? '' }) });
+  if (req.method === 'GET' && path === '/audit-logs') return json(res, 200, { logs: listAuditLogs(db, { limit: url.searchParams.get('limit') }) });
+  const playerMatch = path.match(/^\/players\/([^/]+)(?:\/(freeze|unfreeze|adjustment))?$/);
+  if (playerMatch) {
+    const playerId = decodeURIComponent(playerMatch[1]);
+    const action = playerMatch[2];
+    if (req.method === 'GET' && !action) return json(res, 200, playerDetail(db, playerId));
+    if (req.method === 'POST' && action) {
+      const input = parseJson(await readRaw(req));
+      if (action === 'adjustment') return json(res, 200, manualAdjustment(db, { adminId: admin.id, playerId, amount: input.amount, reason: input.reason }));
+      return json(res, 200, setPlayerStatus(db, { adminId: admin.id, playerId, status: action === 'freeze' ? 'frozen' : 'active', reason: input.reason }));
+    }
+  }
+  return fail(res, 404, 'NOT_FOUND', '没有这个后台接口');
 }
 
 async function launch(playerId, res) {
@@ -214,6 +259,10 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { location: 'http://127.0.0.1:4173/' }); return res.end(); }
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);
+    // await: errors thrown inside must reach the catch below instead of crashing the process.
+    if (url.pathname === '/api/admin' || url.pathname.startsWith('/api/admin/')) return await adminApi(req, res, url);
+    // Older back-office hooks (used by npm run check:provider) also need an admin session.
+    if (url.pathname.startsWith('/admin/') && !currentAdmin(req)) return fail(res, 401, 'ADMIN_UNAUTHENTICATED', '请先以管理员身份登录');
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, state());
     if (req.method === 'POST' && url.pathname === '/admin/fault') {
       const form = new URLSearchParams(await readRaw(req)); const kind = form.get('kind');
@@ -230,7 +279,7 @@ const server = createServer(async (req, res) => {
     json(res, 404, { error: 'Not found' });
   } catch (error) {
     if (error instanceof LedgerError) {
-      const status = error.code === 'USERNAME_TAKEN' ? 409 : error.code === 'PLAYER_FROZEN' ? 403 : error.code === 'LOGIN_RATE_LIMITED' ? 429 : error.code === 'INVALID_CREDENTIALS' ? 401 : 400;
+      const status = error.code === 'USERNAME_TAKEN' ? 409 : error.code === 'PLAYER_FROZEN' ? 403 : error.code === 'LOGIN_RATE_LIMITED' ? 429 : error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'PLAYER_NOT_FOUND' ? 404 : 400;
       return fail(res, status, error.code, error.message);
     }
     json(res, 400, { code: 'BAD_REQUEST', error: error instanceof Error ? error.message : 'Bad request' });

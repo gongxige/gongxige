@@ -40,6 +40,60 @@
         "API_PORT": "8797",
         "WEB_PORT": "4183"
       }
+    },
+    {
+      "name": "admin-platform",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "platform-server.mjs"
+      ],
+      "port": 8808,
+      "env": {
+        "OPERATOR_PORT": "8808",
+        "API_PORT": "8807",
+        "WEB_PORT": "4193",
+        "PROVIDER_URL": "http://127.0.0.1:8807",
+        "OPERATOR_URL": "http://127.0.0.1:8808",
+        "GAME_WEB_URL": "http://127.0.0.1:4193",
+        "DATA_DIR": "data/admin-check",
+        "STATE_FILE": "check-game-server-state.json"
+      }
+    },
+    {
+      "name": "admin-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server.mjs"
+      ],
+      "port": 8807,
+      "env": {
+        "OPERATOR_PORT": "8808",
+        "API_PORT": "8807",
+        "WEB_PORT": "4193",
+        "PROVIDER_URL": "http://127.0.0.1:8807",
+        "OPERATOR_URL": "http://127.0.0.1:8808",
+        "GAME_WEB_URL": "http://127.0.0.1:4193",
+        "DATA_DIR": "data/admin-check",
+        "STATE_FILE": "check-game-server-state.json"
+      }
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite"
+      ],
+      "port": 4193,
+      "env": {
+        "OPERATOR_PORT": "8808",
+        "API_PORT": "8807",
+        "WEB_PORT": "4193",
+        "PROVIDER_URL": "http://127.0.0.1:8807",
+        "OPERATOR_URL": "http://127.0.0.1:8808",
+        "GAME_WEB_URL": "http://127.0.0.1:4193",
+        "DATA_DIR": "data/admin-check",
+        "STATE_FILE": "check-game-server-state.json"
+      }
     }
   ]
 }

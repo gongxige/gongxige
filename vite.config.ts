@@ -17,6 +17,7 @@ export default defineConfig({
       '/api/deposit-requests': `http://127.0.0.1:${operatorPort}`,
       '/api/withdrawal-requests': `http://127.0.0.1:${operatorPort}`,
       '/api/game-records': `http://127.0.0.1:${operatorPort}`,
+      '/api/admin': `http://127.0.0.1:${operatorPort}`,
       '/api': `http://127.0.0.1:${apiPort}`,
       '/auth': `http://127.0.0.1:${operatorPort}`,
       '/games': `http://127.0.0.1:${operatorPort}`

@@ -198,6 +198,51 @@ export function refundBet(db, { playerId, transactionId, refTransactionId, round
   });
 }
 
+/** One admin action in admin_audit_logs. Call inside the transaction that does the action. */
+export function writeAuditLog(db, { adminId, action, targetType = null, targetId = null, reason = null, details = null }) {
+  db.prepare(`INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, reason, details_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id(), adminId, action, targetType, targetId, reason, details ? JSON.stringify(details) : null, now());
+}
+
+function requireReason(reason) {
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  if (!text) throw new LedgerError('REASON_REQUIRED', '必须填写原因');
+  if (text.length > 200) throw new LedgerError('REASON_TOO_LONG', '原因最多 200 个字');
+  return text;
+}
+
+/**
+ * Admin adds (amount > 0) or removes (amount < 0) available credits. The wallet
+ * change, the ledger entry and the audit log are written in one transaction.
+ */
+export function manualAdjustment(db, { adminId, playerId, amount, reason }) {
+  if (!Number.isSafeInteger(amount) || amount === 0) throw new LedgerError('INVALID_AMOUNT', '调整金额必须是非零整数');
+  const text = requireReason(reason);
+  return inTransaction(db, () => {
+    wallet(db, playerId);
+    const transactionId = `manual-adjustment:${id()}`;
+    changeWallet(db, playerId, amount, 0);
+    addLedgerEntry(db, { playerId, transactionId, kind: 'manual_adjustment', amount: Math.abs(amount), balanceDelta: amount, frozenDelta: 0, reason: text });
+    const after = getWallet(db, playerId);
+    writeAuditLog(db, { adminId, action: 'adjust_balance', targetType: 'player', targetId: playerId, reason: text, details: { amount, transactionId, balanceAfter: after.balance } });
+    return { transactionId, ...after };
+  });
+}
+
+/** Freeze or unfreeze a player account, with an audit log in the same transaction. */
+export function setPlayerStatus(db, { adminId, playerId, status, reason }) {
+  if (!['active', 'frozen'].includes(status)) throw new LedgerError('INVALID_STATUS', '状态无效');
+  const text = typeof reason === 'string' && reason.trim() ? requireReason(reason) : null;
+  return inTransaction(db, () => {
+    const player = db.prepare('SELECT status FROM players WHERE id = ?').get(playerId);
+    if (!player) throw new LedgerError('PLAYER_NOT_FOUND', '玩家不存在');
+    db.prepare('UPDATE players SET status = ?, updated_at = ? WHERE id = ?').run(status, now(), playerId);
+    writeAuditLog(db, { adminId, action: status === 'frozen' ? 'freeze_player' : 'unfreeze_player', targetType: 'player', targetId: playerId, reason: text, details: { from: player.status, to: status } });
+    return { id: playerId, status };
+  });
+}
+
 export function reconcilePlayer(db, playerId) {
   const actual = getWallet(db, playerId);
   const totals = db.prepare(`SELECT COALESCE(SUM(balance_delta), 0) AS balance, COALESCE(SUM(frozen_delta), 0) AS frozen

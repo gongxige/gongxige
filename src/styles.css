@@ -199,3 +199,13 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .lobby-return:hover { background: #3c255f; }
 .game-record a { grid-column: 1 / -1; color: #ffe29a; font: 600 13px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
 .profile-card { margin-top: 38px; }.profile-card h2 { margin-top: 0; }
+/* STEP-09 back office */
+.admin-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 22px; }.admin-tabs button { min-height: 40px; padding: 0 16px; border: 1px solid #a87b52; border-radius: 999px; background: transparent; color: #fff2c3; cursor: pointer; font: inherit; font-weight: 700; }.admin-tabs button.active { border-color: #ffd676; background: #ffd676; color: #27172a; }
+.admin-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }.admin-card { display: grid; gap: 6px; padding: 18px; border-radius: 14px; background: linear-gradient(120deg, #3a2650, #5a3b35); }.admin-card span { color: #e7d6b8; font-size: 13px; }.admin-card strong { color: #fffdf2; font-size: 24px; }.admin-hint { grid-column: 1 / -1; margin: 0; color: #c7b9d5; font-size: 13px; }
+.negative { color: #ff8f8f !important; }
+.admin-search { display: flex; gap: 10px; margin-bottom: 16px; }.admin-search input { flex: 1; min-height: 44px; padding: 0 12px; border: 1px solid #c99d5c; border-radius: 9px; background: #fff9e8; color: #25182a; font: inherit; }.admin-search button { padding: 0 18px; }
+.admin-player-row { width: 100%; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }.admin-player-row:hover { background: #3d2d50; }
+.admin-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 18px; }.admin-detail-head h2 { margin: 0; color: #fff7df; }.admin-detail-head small { color: #c7b9d5; overflow-wrap: anywhere; }
+.status-pill { padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: 13px; }.status-pill.active { background: #2f5b45; color: #c9f5d9; }.status-pill.frozen { background: #6b2b33; color: #ffd1d1; }
+.admin-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }.admin-forms h3 { margin: 0; color: #fff4d0; }
+@media (max-width: 560px) { .admin-search { flex-direction: column; }.admin-detail-head { align-items: flex-start; flex-direction: column; } }

@@ -75,6 +75,30 @@ export const PLATFORM_SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS admins (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    login_locked_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id TEXT PRIMARY KEY,
+    admin_id TEXT NOT NULL REFERENCES admins(id),
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    reason TEXT,
+    details_json TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS admin_audit_logs_created_at
+    ON admin_audit_logs(created_at);
   CREATE INDEX IF NOT EXISTS ledger_entries_player_created_at
     ON ledger_entries(player_id, created_at);
   CREATE INDEX IF NOT EXISTS withdrawal_requests_player_status

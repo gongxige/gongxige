@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import GameApp from './GameApp.tsx';
+import AdminApp from './admin/AdminApp.tsx';
 
 type Player = { id: string; username: string; status: string };
 type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
@@ -41,7 +42,7 @@ function Lobby({ player, onLogout, onWallet, onGameRecords, onProfile }: { playe
   return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO GAME LOBBY</p><h1>你好，{player.username}</h1></div><div className="header-actions"><button className="text-button" onClick={onWallet}>我的钱包</button><button className="text-button" onClick={onGameRecords}>游戏记录</button><button className="text-button" onClick={onProfile}>个人中心</button><button className="text-button" onClick={logout}>退出登录</button></div></header><section className="wallet-panel" aria-label="虚拟积分余额"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>DEMO · 仅供本地演示</small></section><section className="games-section"><div><p className="eyebrow">游戏大厅</p><h2>选择一款游戏</h2></div><button className="game-card" onClick={launch} disabled={launching} aria-label="进入 Wild Frontier"><span className="game-card-art">♜</span><span className="game-card-body"><b>Wild Frontier</b><small>1024 Ways · 虚拟积分体验</small></span><span className="game-card-action">{launching ? '启动中…' : '进入游戏 →'}</span></button>{message && <p className="form-message" role="status">{message}</p>}</section></main>;
 }
 
-const kindLabel: Record<string, string> = { deposit: '充值申请', withdrawal: '提现申请', bet: '下注', win: '派彩', refund: '回滚' };
+const kindLabel: Record<string, string> = { deposit: '充值申请', withdrawal: '提现申请', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
 const statusLabel: Record<string, string> = { pending: '待审核', approved: '已通过', rejected: '已拒绝', completed: '成功', refunded: '已回滚' };
 
 function WalletPage({ onBack }: { onBack: () => void }) {
@@ -65,6 +66,11 @@ function ProfilePage({ onBack }: { onBack: () => void }) {
 }
 
 export default function App() {
+  if (location.pathname === '/admin' || location.pathname.startsWith('/admin/')) return <AdminApp />;
+  return <PlayerApp />;
+}
+
+function PlayerApp() {
   const hasGameToken = new URLSearchParams(location.search).has('token'); const [player, setPlayer] = useState<Player | null>(null); const [view, setView] = useState<View>('login');
   useEffect(() => { if (!hasGameToken) platformFetch<{ player: Player }>('/auth/me').then(({ player: next }) => { setPlayer(next); setView('lobby'); }).catch(() => undefined); }, [hasGameToken]);
   if (hasGameToken) return <GameApp />;

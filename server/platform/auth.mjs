@@ -19,7 +19,7 @@ export async function hashPassword(password) {
   return { salt, hash };
 }
 
-async function passwordMatches(password, salt, storedHash) {
+export async function passwordMatches(password, salt, storedHash) {
   if (!validPassword(password) || !salt || !storedHash) return false;
   const actual = await scrypt(password, salt, KEY_LENGTH);
   const expected = Buffer.from(storedHash, 'base64url');
