@@ -8,12 +8,18 @@
 // Pure time maths, no DOM, so it is unit-tested directly.
 
 /** Full speed, in symbols per millisecond. */
-export const SPIN_SPEED = 0.022;
+export const SPIN_SPEED = 0.013;
 export const ACCEL_MS = 260;
 /** Deceleration always covers at least this many symbols, so the landing symbols are placed off-screen. */
 export const MIN_STOP_DISTANCE = 5;
 export const OVERSHOOT = 0.28;
-export const SETTLE_MS = 170;
+export const SETTLE_MS = 100;
+/**
+ * A gentle ease-out that stays close to the spin speed at first.  Unlike a
+ * quadratic ease-out, it keeps the five-symbol safe landing distance from
+ * making the new, slower reels feel late.
+ */
+export const DECEL_EASE_POWER = 1.35;
 
 type Phase =
   | { kind: 'idle' }
@@ -33,7 +39,7 @@ export class ReelMotion {
   get isIdle() { return this.phase.kind === 'idle'; }
   /** Deceleration can only begin once the reel is at full speed. */
   get canStop() { return this.phase.kind === 'spin'; }
-  /** At or near full speed: the view blurs the symbols. */
+  /** At or near full speed: the view can apply its moving-reel treatment. */
   get isFast() { return this.phase.kind === 'spin' || this.phase.kind === 'accel' || this.phase.kind === 'decel'; }
 
   start(now: number) {
@@ -51,12 +57,14 @@ export class ReelMotion {
     this.update(now);
     if (this.phase.kind !== 'spin') throw new Error('Reel is not at full speed');
     // A longer slow-down from the same full speed simply covers more symbols.
-    const symbols = Math.max(MIN_STOP_DISTANCE, Math.round((SPIN_SPEED * slowMs) / 2));
+    // The easing below takes DECEL_EASE_POWER * distance / speed, so calibrate
+    // the anticipation distance to retain its requested slow-down duration.
+    const symbols = Math.max(MIN_STOP_DISTANCE, Math.round((SPIN_SPEED * slowMs) / DECEL_EASE_POWER));
     const target = Math.ceil(this.position) + symbols;
-    // Ease-out quad starts at velocity 2·distance/duration; matching that to
-    // SPIN_SPEED keeps the hand-over from full speed seamless.
+    // The ease-out starts at DECEL_EASE_POWER·distance/duration. Matching that
+    // to SPIN_SPEED keeps the hand-over from full speed seamless.
     const distance = target + OVERSHOOT - this.position;
-    this.phase = { kind: 'decel', start: now, from: this.position, to: target, duration: (2 * distance) / SPIN_SPEED };
+    this.phase = { kind: 'decel', start: now, from: this.position, to: target, duration: (DECEL_EASE_POWER * distance) / SPIN_SPEED };
     return target;
   }
 
@@ -79,7 +87,7 @@ export class ReelMotion {
         return false;
       case 'decel': {
         const u = Math.min((now - phase.start) / phase.duration, 1);
-        this.position = phase.from + (phase.to + OVERSHOOT - phase.from) * (1 - (1 - u) * (1 - u));
+        this.position = phase.from + (phase.to + OVERSHOOT - phase.from) * (1 - (1 - u) ** DECEL_EASE_POWER);
         if (u < 1) return false;
         this.phase = { kind: 'settle', start: phase.start + phase.duration, to: phase.to };
         return this.update(now);
