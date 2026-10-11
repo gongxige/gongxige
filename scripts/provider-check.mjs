@@ -9,6 +9,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sign, signedPost } from '../server/http.mjs';
+import { replayPage } from '../server/replay-page.mjs';
 
 const SPINS = Number(process.argv[2] ?? 10);
 // A per-process port pair makes repeated checks independent from a previous
@@ -73,10 +74,12 @@ assert.equal(s.players['player-002'].balance, balance);
 assert.ok(s.players['player-002'].ok, 'reconciliation');
 step(`连转 ${SPINS} 局（含 ${free} 局免费游戏）：每局余额变化 = −投注 + 赢分，与平台余额一致，对账一致`);
 
+// Round lookup is only for the operator, with a signature, and only for its own player's rounds.
+const lookupRound = (roundId, playerId = 'player-002', options = opts) => signedPost(`${API}/provider/rounds`, { playerId, roundId }, options);
 const byRound = new Map();
 for (const tx of s.transactions) { if (!byRound.has(tx.roundId)) byRound.set(tx.roundId, []); byRound.get(tx.roundId).push(tx); }
 for (const id of roundIds) {
-  const { body } = await getJson(`${API}/api/rounds/${id}`);
+  const { body } = await lookupRound(id);
   assert.ok(body.replay.matches, `replay ${id}`);
   assert.equal(body.round.status, 'settled');
   const txs = byRound.get(id);
@@ -84,9 +87,11 @@ for (const id of roundIds) {
   assert.equal(txs.filter((t) => t.type === 'bet').length, body.round.mode === 'base' ? 1 : 0);
   assert.equal(txs.find((t) => t.type === 'win').amount, body.round.payout);
 }
-const page = await fetch(`${API}/api/replay/${roundIds[0]}`).then((r) => r.text());
-assert.ok(page.includes('完全一致'));
-step('每一局都能按局号查到、回放结果一致；每局正好 1 笔派彩，付费局正好 1 笔扣款');
+assert.ok(replayPage((await lookupRound(roundIds[0])).body.round, API).includes('完全一致'));
+assert.equal((await lookupRound(roundIds[0], 'player-001')).status, 404);
+assert.equal((await lookupRound(roundIds[0], 'player-002', { secret: 'wrong-secret', operatorId: 'demo-operator' })).status, 401);
+assert.equal((await fetch(`${API}/api/rounds/${roundIds[0]}`)).status, 404);
+step('每一局都能按局号查到、回放结果一致；每局正好 1 笔派彩，付费局正好 1 笔扣款；别的玩家、错误签名、无签名都查不到');
 
 // Fault 1: wins fail for a while → the round still counts, the win is delivered later.
 async function playUntilPaid() { while (true) { const r = await spinOnce(token, 80); assert.equal(r.status, 200); if (r.body.mode === 'paid') return r.body; } }
@@ -94,9 +99,9 @@ while ((await getJson(`${API}/api/session?token=${token}`)).body.freeSpins) awai
 await setFault('win-down');
 const late = await playUntilPaid();
 assert.equal(late.settlementPending, true);
-assert.equal((await getJson(`${API}/api/rounds/${late.roundId}`)).body.round.status, 'win-pending');
-for (let i = 0; i < 40 && (await getJson(`${API}/api/rounds/${late.roundId}`)).body.round.status !== 'settled'; i += 1) await sleep(500);
-assert.equal((await getJson(`${API}/api/rounds/${late.roundId}`)).body.round.status, 'settled');
+assert.equal((await lookupRound(late.roundId)).body.round.status, 'win-pending');
+for (let i = 0; i < 40 && (await lookupRound(late.roundId)).body.round.status !== 'settled'; i += 1) await sleep(500);
+assert.equal((await lookupRound(late.roundId)).body.round.status, 'settled');
 s = await opState();
 assert.ok(s.players['player-002'].ok);
 assert.equal(s.players['player-002'].balance, late.credits);

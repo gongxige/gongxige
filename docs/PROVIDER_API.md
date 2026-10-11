@@ -38,10 +38,15 @@
 
 平台把玩家的浏览器带到 `gameUrl`。token 24 小时内有效；过期后要从大厅重新进入。
 
-### GET /api/rounds/{roundId}、GET /api/replay/{roundId}
+### POST /provider/rounds（需签名）
 
-按局号查这一局：前者返回 JSON（含"重新计算是否一致"），后者是给人看的回放页面。
-（本机演示没有加权限；正式系统里只能由平台后台或客服带签名访问。）
+平台查自己玩家的游戏记录。只返回签名平台、且属于这个 `playerId` 的局；别人的局号一律返回 404。
+
+- 查列表：`{ "playerId": "player-001" }` → `{ "records": [{ roundId, at, bet, payout }] }`
+- 查单局：`{ "playerId": "player-001", "roundId": "…" }` → `{ "round": {…}, "replay": { payout, freeSpinsAwarded, matches } }`，`matches` 表示用停点重新计算的结果是否和记录一致。
+
+回放页面由平台用返回的 `round` 渲染（`server/replay-page.mjs`）：玩家网站是 `/api/game-records/{局号}/replay`（只能看自己的），模拟平台后台是 `/admin/replay?player=…&round=…`。
+（STEP-08 起，原来不需要权限的 `GET /api/rounds/{局号}`、`GET /api/replay/{局号}` 已删除，避免玩家按局号看到别人的记录。）
 
 ## 四、游戏服务器调用平台（平台要实现的钱包接口）
 

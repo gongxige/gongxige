@@ -255,7 +255,8 @@ function handleRoundLookup(raw, req, res) {
   if (roundId) {
     const round = rounds.get(String(roundId));
     if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
-    return json(res, 200, { round });
+    const replayed = replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
+    return json(res, 200, { round, replay: { payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, matches: replayed.payout === round.payout && round.engineVersion === ENGINE_VERSION } });
   }
   const records = rounds.list((round) => ownsRound(round)).map((round) => ({ roundId: round.roundId, at: round.at, bet: round.bet, payout: round.payout }));
   return json(res, 200, { records });

@@ -1,5 +1,22 @@
 # 开发日志
 
+## 2026-10-11 · STEP-08 修复 check:provider 回归（Claude Code 介入，Codex 额度用完期间）
+
+**问题**：第 2 次审计打回——第 2 次改动删除了公开的 `GET /api/rounds/{id}`、`GET /api/replay/{id}`（为了不让玩家按局号看到别人的记录），但 `npm run check:provider`、`docs/PROVIDER_API.md` 和模拟平台 `mock-operator.mjs` 的流水链接还在用旧接口，导致检查失败。
+
+**做了什么**（保留"只能查自己的局"的设计，把用到旧接口的地方都改过来）
+
+- `server.mjs`：带签名的 `POST /provider/rounds` 查单局时，同时返回 `replay`（用停点重新计算的结果、是否一致）。
+- `scripts/provider-check.mjs`：回放一致性和派彩故障场景改用签名的 `POST /provider/rounds`；回放页面用 `replayPage` 渲染检查"完全一致"；新增断言：别的玩家查同一局号 404、错误签名 401、旧的 `GET /api/rounds/{id}` 已经 404。
+- `mock-operator.mjs`：流水里的局号链接改为 `/admin/replay?player=…&round=…`，由模拟平台带签名查询后渲染回放页。
+- `docs/PROVIDER_API.md`、`docs/DEVELOPMENT_PLAN.md`：接口说明改为新的 `POST /provider/rounds`。
+
+**怎么验证的**：`npm run build` 通过；`npm test` 45/45 通过；`npm run check:provider` 全部通过（含新增的越权断言）；另在临时端口启动 `mock-operator.mjs` + `server.mjs` 转一局，`/admin/replay` 本人局 200 且显示"完全一致"，换成别的玩家 404，流水表链接已指向新地址。
+
+**遗留问题**：`docs/CLOUD_DEPLOY_TASK.md` 里"保护 `/api/rounds/*`、`/api/replay/*`"一条已不再需要（接口已删除），上云时注意即可。
+
+---
+
 ## 2026-10-11 · STEP-08 玩家：游戏记录、个人中心（第 2 次）
 
 **做了什么**：按审计意见修复 `vite.config.ts` 的 API 代理。钱包、充值/提现申请和游戏记录（含局号回放）这几类玩家平台接口现在明确转发到由 `OPERATOR_PORT` 指定的 8788 平台服务；供应商游戏接口仍由通用 `/api` 规则转发到 `API_PORT` 的 8787 服务。`/auth`、`/games` 也改为复用 `OPERATOR_PORT`，避免自定义端口时再次错配。

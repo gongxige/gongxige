@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { escapeHtml, html, json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
+import { replayPage } from './server/replay-page.mjs';
 
 export const OPERATOR_PROTOCOL = 'provider-v1';
 const port = Number(process.env.OPERATOR_PORT ?? 8788);
@@ -166,7 +167,7 @@ function tables() {
     const t = state.transactions[id];
     return `<tr class="${t.type}"><td>${t.at.slice(11, 19)}</td><td>${TYPE_LABEL[t.type]}</td><td>${escapeHtml(state.players[t.playerId]?.name ?? t.playerId)}</td>
       <td class="num">${t.type === 'bet' ? '−' : '+'}${fmt(t.amount)}</td><td class="num">${fmt(t.balanceAfter)}</td>
-      <td>${t.roundId ? `<a href="${gameWebUrl}/api/replay/${encodeURIComponent(t.roundId)}" target="_blank">${escapeHtml(t.roundId)}</a>` : ''}</td>
+      <td>${t.roundId ? `<a href="/admin/replay?player=${encodeURIComponent(t.playerId)}&round=${encodeURIComponent(t.roundId)}" target="_blank">${escapeHtml(t.roundId)}</a>` : ''}</td>
       <td>${STATUS_LABEL[t.status] ?? t.status}</td><td><small>${escapeHtml(t.txId)}</small></td></tr>`;
   }).join('') || '<tr><td colspan="8" class="empty">还没有交易。点上面的"进入游戏"转几局。</td></tr>';
   return { players, txs };
@@ -235,6 +236,11 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/admin/tables') {
       const faultText = fault.kind === 'none' ? '无' : fault.kind === 'win-down' ? `派彩故障（还剩 ${fault.remaining} 次）` : '下一次扣款超时';
       return json(res, 200, { ...tables(), fault: faultText });
+    }
+    // Round replay: asks the game server with a signature, only for this operator's own player.
+    if (req.method === 'GET' && url.pathname === '/admin/replay') {
+      const { status, body } = await signedPost(`${providerUrl}/provider/rounds`, { playerId: url.searchParams.get('player'), roundId: url.searchParams.get('round') }, { secret, operatorId });
+      return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl));
     }
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, { players: Object.fromEntries(Object.keys(state.players).map((id) => [id, { ...state.players[id], ...reconcile(id) }])), transactions: state.order.map((id) => state.transactions[id]) });
     if (req.method === 'POST' && url.pathname.startsWith('/admin/')) {
