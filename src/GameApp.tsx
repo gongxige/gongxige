@@ -206,8 +206,6 @@ export default function GameApp() {
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
   return <main className="game-shell">
-    <div className="demo-notice game-demo-notice">演示平台 · 仅虚拟积分 · 不涉及真实货币</div>
-    <a className="lobby-return" href="/">返回大厅</a>
     <section className={`stage ${showWin ? 'has-win' : ''} ${inFreeSpins ? 'is-free' : ''}`} aria-label="Wild Frontier 1024 Ways">
       <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} disabled={spinning || inFreeSpins} onRules={() => setModal('rules')} />
       <div className="reel-frame" aria-hidden="true" />
@@ -231,7 +229,6 @@ export default function GameApp() {
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
       <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>
-    <p className="rotate-hint">横屏体验更好</p>
     {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
   </main>;
 }
