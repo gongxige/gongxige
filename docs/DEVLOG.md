@@ -1,5 +1,15 @@
 # 开发日志
 
+## 2026-10-11 · 自动接力跑完全部 11 步（汇总见 docs/workflow/REPORT.md）
+
+**做了什么**：`scripts/autopilot.mjs` 又改了三处：环境错误只认 Codex 自己的 `ERROR codex_core::tools::router … helper_unknown_error` 日志行（之前按关键词计数，Codex 读到 DEVLOG 里的说明就误判）；识别"Codex 用量额度用完"，停下、单独提交已写的部分（wip）、不审计、不计次数；新增人工开发模式 `AUTOPILOT_DEV=manual`（不调用 Codex，只审计已提交的代码，不通过就停下）。STEP-01 ~ STEP-07 由 Codex 完成，STEP-08 第 3 次和 STEP-09 ~ STEP-11 在 Codex 额度用完后由 Claude Code 完成，全部由独立的 Claude Code 审计通过。
+
+**怎么验证的**：检测规则用 4 份旧故障日志、正常日志和额度用完日志验证；人工模式实际跑了 STEP-08 ~ STEP-11 四次审计。
+
+**遗留问题**：无。
+
+---
+
 ## 2026-10-11 · STEP-11 端到端检查和收尾（Claude Code 人工开发模式）
 
 **做了什么**
