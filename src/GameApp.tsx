@@ -32,6 +32,41 @@ type SpinResult = {
 };
 type Overlay = { kind: 'awarded'; count: number; retrigger: boolean } | { kind: 'finished'; played: number; totalWin: number };
 
+/** Decorative SVG only: it stays inside the scaled stage and never receives input. */
+function SavannaNight() {
+  return <svg className="savanna-night" viewBox="0 0 1280 720" preserveAspectRatio="none" aria-hidden="true">
+    <g className="night-stars">
+      <circle cx="130" cy="106" r="2" /><circle cx="212" cy="180" r="1.4" /><circle cx="322" cy="82" r="1.7" />
+      <circle cx="470" cy="147" r="1.2" /><circle cx="790" cy="94" r="1.6" /><circle cx="958" cy="148" r="1.3" />
+      <circle cx="1104" cy="82" r="2" /><circle cx="1180" cy="190" r="1.2" />
+    </g>
+    <g className="distant-trees">
+      <path d="M84 495v-116l-19-43 22 17 7-61 7 61 24-18-21 44v116z" />
+      <path d="M103 340c-47 0-62-16-68-39 33-2 44-22 69-11 19-24 54-9 67 12-11 29-33 38-68 38z" />
+      <path d="M1138 495V356l-25-52 29 20 9-74 8 74 32-21-28 54v138z" />
+      <path d="M1147 300c-58 0-78-20-85-47 38-2 55-29 85-14 23-29 66-11 82 15-13 35-43 46-82 46z" />
+      <path d="M1002 510v-98l-18-38 21 15 6-49 6 49 23-15-19 39v97z" />
+      <path d="M1010 376c-39 0-55-14-60-33 27-1 38-20 61-10 17-21 48-8 60 11-10 24-31 32-61 32z" />
+    </g>
+    <path className="grass-back" d="M0 605c48-33 86-33 134 0 40-53 93-54 142 0 36-30 78-31 119 0 47-57 101-55 149 0 53-42 108-42 163 0 41-34 86-34 128 0 43-48 97-47 142 0 48-31 102-31 143 0 39-45 84-45 130 0v115H0z" />
+    <path className="grass-front" d="M0 648l23-28 3 31 25-43 2 43 38-30-13 34 47-24-16 36 57-20-24 37 66-14-25 39 74-5-29 38 83 3-25 32 103 9-37 31h715l-36-33 99-7-28-35 89-2-26-39 76 8-21-43 64 16-19-42 51 24-13-38 42 32-4-45 33 42 5-34 25 27V720H0z" />
+  </svg>;
+}
+
+function ReelFrame() {
+  return <div className="reel-frame" aria-hidden="true">
+    <svg className="frame-knots" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <g className="rope-knot">
+        <g transform="translate(4 4)"><circle cx="0" cy="0" r="4" /><path d="M-6-6 6 6M6-6-6 6" /></g>
+        <g transform="translate(92 4)"><circle cx="0" cy="0" r="4" /><path d="M-6-6 6 6M6-6-6 6" /></g>
+        <g transform="translate(4 92)"><circle cx="0" cy="0" r="4" /><path d="M-6-6 6 6M6-6-6 6" /></g>
+        <g transform="translate(92 92)"><circle cx="0" cy="0" r="4" /><path d="M-6-6 6 6M6-6-6 6" /></g>
+      </g>
+    </svg>
+    <span className="frame-marker" />
+  </div>;
+}
+
 /** Pause between free spins: longer after a win so it can be seen. */
 const FREE_SPIN_DELAY_MS = { win: 1600, noWin: 700 };
 const OVERLAY_MS = { awarded: 2600, finished: 3600 };
@@ -244,8 +279,9 @@ export default function GameApp() {
 
   return <main className="game-shell">
     <section className={`stage ${showWin ? 'has-win' : ''} ${inFreeSpins ? 'is-free' : ''}`} aria-label="Wild Frontier 1024 Ways">
+      <SavannaNight />
       <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} onRules={() => setModal('rules')} />
-      <div className="reel-frame" aria-hidden="true" />
+      <ReelFrame />
       <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
       <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
       <ReelBoard reels={reels} winningCells={cycle ? cycle.cells : []} />
