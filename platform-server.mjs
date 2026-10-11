@@ -7,12 +7,14 @@ import { json, html, parseJson, readRaw, signedPost, verify } from './server/htt
 import { openPlatformDatabase } from './server/platform/db.mjs';
 import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, placeBet, reconcilePlayer, refundBet } from './server/platform/ledger.mjs';
 import { authenticatePlayer, changePassword, createSessionStore, registerPlayer } from './server/platform/auth.mjs';
+import { replayPage } from './server/replay-page.mjs';
 
 export const PLATFORM_PROTOCOL = 'provider-v1';
 const port = Number(process.env.OPERATOR_PORT ?? 8788);
 const operatorId = process.env.OPERATOR_ID ?? 'demo-operator';
 const secret = process.env.OPERATOR_SECRET ?? 'local-demo-secret';
 const providerUrl = process.env.PROVIDER_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? 8787}`;
+const gameWebUrl = process.env.GAME_WEB_URL ?? `http://127.0.0.1:${process.env.WEB_PORT ?? 4173}`;
 const db = openPlatformDatabase(join(process.env.DATA_DIR ?? join(process.cwd(), 'data'), process.env.PLATFORM_DB_FILE ?? 'platform.sqlite'));
 const sessions = createSessionStore();
 
@@ -117,6 +119,10 @@ async function createLaunch(playerId) {
   return body;
 }
 
+async function providerRounds(playerId, roundId) {
+  return signedPost(`${providerUrl}/provider/rounds`, { playerId, ...(roundId ? { roundId } : {}) }, { secret, operatorId });
+}
+
 async function launch(playerId, res) {
   const player = db.prepare('SELECT id, username FROM players WHERE id = ?').get(playerId);
   if (!player) return html(res, 404, '没有这个玩家');
@@ -189,6 +195,22 @@ const server = createServer(async (req, res) => {
       if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
       await changePassword(db, { playerId: player.id, ...parseJson(await readRaw(req)) });
       return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/game-records') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      const { status, body } = await providerRounds(player.id);
+      if (status !== 200) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取游戏记录');
+      return json(res, 200, { records: body.records });
+    }
+    const replayMatch = url.pathname.match(/^\/api\/game-records\/([\w-]+)\/replay$/);
+    if (req.method === 'GET' && replayMatch) {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      const { status, body } = await providerRounds(player.id, replayMatch[1]);
+      if (status === 404) return fail(res, 404, 'ROUND_NOT_FOUND', '没有这个局号');
+      if (status !== 200) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取回放');
+      return html(res, 200, replayPage(body.round, gameWebUrl));
     }
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { location: 'http://127.0.0.1:4173/' }); return res.end(); }
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);

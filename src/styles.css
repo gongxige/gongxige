@@ -197,3 +197,5 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 @media (max-width: 560px) { .platform-page { padding: 72px 16px 32px; }.auth-card { margin: 3vh auto; padding: 24px; }.lobby-header { align-items: flex-start; }.game-card { align-items: flex-start; flex-wrap: wrap; }.game-card-action { width: 100%; margin-left: 86px; } }
 .lobby-return { position: absolute; z-index: 31; top: 42px; right: max(16px, calc((100vw - min(100vw, calc(100dvh * 16 / 9))) / 2 + 16px)); padding: 8px 12px; border: 1px solid #f2cb72; border-radius: 8px; background: #25153fe6; color: #fff5cf; font: 700 14px/1 system-ui, sans-serif; text-decoration: none; }
 .lobby-return:hover { background: #3c255f; }
+.game-record a { grid-column: 1 / -1; color: #ffe29a; font: 600 13px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.profile-card { margin-top: 38px; }.profile-card h2 { margin-top: 0; }

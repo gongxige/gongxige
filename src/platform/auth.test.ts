@@ -7,9 +7,12 @@ import { join } from 'node:path';
 import { sign } from '../../server/http.mjs';
 
 const port = 22000 + (process.pid % 1000);
+const apiPort = port + 1000;
 const directory = mkdtempSync(join(tmpdir(), 'platform-auth-'));
 const base = `http://127.0.0.1:${port}`;
+const apiBase = `http://127.0.0.1:${apiPort}`;
 let server: ChildProcess;
+let apiServer: ChildProcess;
 
 async function request(path: string, init: RequestInit = {}) {
   const response = await fetch(`${base}${path}`, { ...init, headers: { 'content-type': 'application/json', ...init.headers } });
@@ -18,11 +21,16 @@ async function request(path: string, init: RequestInit = {}) {
 }
 
 before(async () => {
-  server = spawn(process.execPath, ['platform-server.mjs'], { env: { ...process.env, OPERATOR_PORT: String(port), DATA_DIR: directory }, stdio: 'ignore' });
-  for (let i = 0; i < 30; i += 1) { if ((await fetch(`${base}/health`).catch(() => null))?.ok) return; await new Promise((resolve) => setTimeout(resolve, 100)); }
-  throw new Error('platform server did not start');
+  apiServer = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, API_PORT: String(apiPort), OPERATOR_PORT: String(port), DATA_DIR: directory }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['platform-server.mjs'], { env: { ...process.env, OPERATOR_PORT: String(port), PROVIDER_URL: apiBase, DATA_DIR: directory }, stdio: 'ignore' });
+  for (let i = 0; i < 50; i += 1) {
+    const [platform, provider] = await Promise.all([fetch(`${base}/health`).catch(() => null), fetch(`${apiBase}/api/health`).catch(() => null)]);
+    if (platform?.ok && provider?.ok) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('platform or provider server did not start');
 });
-after(async () => { server.kill(); await new Promise((resolve) => server.once('exit', resolve)); rmSync(directory, { recursive: true, force: true }); });
+after(async () => { server.kill(); apiServer.kill(); await Promise.all([new Promise((resolve) => server.once('exit', resolve)), new Promise((resolve) => apiServer.once('exit', resolve))]); rmSync(directory, { recursive: true, force: true }); });
 
 describe('玩家认证接口', () => {
   it('拒绝重复用户名且数据库不保存明文密码', async () => {
@@ -81,5 +89,31 @@ describe('玩家认证接口', () => {
     const payload = JSON.stringify({ playerId: player.id, transactionId: 'frozen-bet', roundId: 'r', amount: 1 });
     const wallet = await request('/wallet/bet', { method: 'POST', headers: { 'x-operator-id': 'demo-operator', 'x-signature': sign(payload, 'local-demo-secret') }, body: payload });
     assert.equal(wallet.status, 403);
+  });
+
+  it('游戏记录和回放只允许当前玩家读取，且可以修改密码', async () => {
+    await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'roundowner', password: 'secure-pass-6' }) });
+    await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'otherplayer', password: 'secure-pass-7' }) });
+    const owner = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username: 'roundowner', password: 'secure-pass-6' }) });
+    const other = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username: 'otherplayer', password: 'secure-pass-7' }) });
+    const spinFor = async (cookie: string) => {
+      const launch = await request('/games/wild-frontier/launch', { method: 'POST', headers: { cookie }, body: '{}' });
+      assert.equal(launch.status, 200);
+      const token = new URL(launch.body.gameUrl).searchParams.get('token');
+      const response = await fetch(`${apiBase}/api/spin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, bet: 40 }) });
+      assert.equal(response.status, 200);
+      return (await response.json()).roundId as string;
+    };
+    const ownerRoundId = await spinFor(owner.cookie!);
+    const otherRoundId = await spinFor(other.cookie!);
+    const records = await request('/api/game-records', { headers: { cookie: owner.cookie! } });
+    assert.equal(records.status, 200);
+    assert.deepEqual(records.body.records.map((record: { roundId: string }) => record.roundId), [ownerRoundId]);
+    const ownReplay = await fetch(`${base}/api/game-records/${ownerRoundId}/replay`, { headers: { cookie: owner.cookie! } });
+    assert.equal(ownReplay.status, 200);
+    assert.match(await ownReplay.text(), new RegExp(ownerRoundId));
+    assert.equal((await request(`/api/game-records/${otherRoundId}/replay`, { headers: { cookie: owner.cookie! } })).status, 404);
+    assert.equal((await request('/auth/password', { method: 'POST', headers: { cookie: owner.cookie! }, body: JSON.stringify({ currentPassword: 'secure-pass-6', newPassword: 'changed-pass-6' }) })).status, 200);
+    assert.equal((await request('/auth/login', { method: 'POST', body: JSON.stringify({ username: 'roundowner', password: 'changed-pass-6' }) })).status, 200);
   });
 });

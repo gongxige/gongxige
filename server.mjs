@@ -14,9 +14,8 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALLOWED_BETS, ENGINE_VERSION, computeRtp, isAllowedBet, replaySpin, spin } from './src/engine/index.ts';
-import { html, json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
+import { json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
 import { openRoundLog } from './server/rounds.mjs';
-import { replayPage } from './server/replay-page.mjs';
 
 /** Bumped when the browser ↔ server or server ↔ operator protocol changes. */
 export const SERVER_PROTOCOL = 'provider-v1';
@@ -246,6 +245,22 @@ function handleLaunch(raw, req, res) {
   return json(res, 200, { token, gameUrl: `${gameWebUrl}/?token=${token}`, expiresInSeconds: SESSION_TTL_MS / 1000 });
 }
 
+function handleRoundLookup(raw, req, res) {
+  const operatorId = String(req.headers['x-operator-id'] ?? '');
+  const operator = OPERATORS[operatorId];
+  if (!operator || !verify(raw, req.headers['x-signature'], operator.secret)) return json(res, 401, { code: 'BAD_SIGNATURE', error: '签名不对，拒绝处理' });
+  const { playerId, roundId } = parseJson(raw);
+  if (!playerId) return json(res, 400, { code: 'BAD_REQUEST', error: '缺少 playerId' });
+  const ownsRound = (round) => round && round.operatorId === operatorId && round.playerId === String(playerId);
+  if (roundId) {
+    const round = rounds.get(String(roundId));
+    if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
+    return json(res, 200, { round });
+  }
+  const records = rounds.list((round) => ownsRound(round)).map((round) => ({ roundId: round.roundId, at: round.at, bet: round.bet, payout: round.payout }));
+  return json(res, 200, { records });
+}
+
 // ---------- server ----------
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -253,16 +268,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, protocol: SERVER_PROTOCOL, pending: state.pending.length });
     if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, publicConfig());
     if (req.method === 'POST' && url.pathname === '/provider/launch') return handleLaunch(await readRaw(req), req, res);
-
-    // Round lookup and replay (customer support / operator back office).
-    const roundMatch = url.pathname.match(/^\/api\/(rounds|replay)\/([\w-]+)$/);
-    if (req.method === 'GET' && roundMatch) {
-      const round = rounds.get(roundMatch[2]);
-      if (roundMatch[1] === 'replay') return html(res, round ? 200 : 404, replayPage(round, gameWebUrl));
-      if (!round) return json(res, 404, { error: '没有这个局号' });
-      const replayed = replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
-      return json(res, 200, { round, replay: { payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, matches: replayed.payout === round.payout && round.engineVersion === ENGINE_VERSION } });
-    }
+    if (req.method === 'POST' && url.pathname === '/provider/rounds') return handleRoundLookup(await readRaw(req), req, res);
 
     if (url.pathname === '/api/session' || url.pathname === '/api/spin') {
       const input = req.method === 'POST' ? parseJson(await readRaw(req)) : {};
