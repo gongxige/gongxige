@@ -14,6 +14,7 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALLOWED_BETS, ENGINE_VERSION, computeRtp, isAllowedBet, replaySpin, spin } from './src/engine/index.ts';
+import { MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER as MAHJONG_MAX_WIN_MULTIPLIER, replaySpin as replayMahjongSpin, settleSpin as settleMahjongSpin } from './src/mahjong/engine/index.ts';
 import { json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
 import { openRoundLog } from './server/rounds.mjs';
 
@@ -39,11 +40,11 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const RETRY_DELAYS = [0, 300, 1000];
 /** The player is waiting on a bet, so it gets two short attempts; if both go unanswered the round is cancelled. */
 const BET_DELAYS = [0, 300];
-const BET_TIMEOUT_MS = 3000;
+const BET_TIMEOUT_MS = Number(process.env.BET_TIMEOUT_MS ?? 3000);
 
 // ---------- state ----------
-// sessions[token]         = { operatorId, playerId, playerName, createdAt }
-// players["op:player"]    = { freeSpins, lastBalance }   freeSpins: null or { bet, remaining, played, totalWin, triggerRoundId }
+// sessions[token]         = { operatorId, playerId, playerName, gameId, createdAt }
+// players["op:player:game"] = { freeSpins, lastBalance }
 // pending[]               = wallet calls that must still reach the operator (wins, refunds)
 const defaultState = () => ({ settings: { maxWinMultiplier: 1000 }, sessions: {}, players: {}, pending: [] });
 const state = existsSync(statePath) ? { ...defaultState(), ...JSON.parse(readFileSync(statePath, 'utf8')) } : defaultState();
@@ -51,7 +52,20 @@ const save = () => writeJsonAtomic(statePath, state);
 const rounds = openRoundLog(roundLogPath);
 const busy = new Set();
 
-const playerKey = (s) => `${s.operatorId}:${s.playerId}`;
+const GAMES = {
+  'wild-frontier': {
+    gameId: 'wild-frontier', title: 'Wild Frontier', engineVersion: ENGINE_VERSION,
+    allowedBets: ALLOWED_BETS, isAllowedBet, launchPath: '/',
+  },
+  'mahjong-cascade': {
+    gameId: 'mahjong-cascade', title: '麻将连连胡', engineVersion: 'mahjong-engine-1.2.0',
+    mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision,
+    // The configured rational pay table produces integral virtual credits at this denomination.
+    allowedBets: [10_000], isAllowedBet: (bet) => bet === 10_000, launchPath: '/mahjong',
+  },
+};
+const gameFor = (gameId) => GAMES[gameId] ?? null;
+const playerKey = (s) => `${s.operatorId}:${s.playerId}:${s.gameId ?? 'wild-frontier'}`;
 const playerState = (s) => (state.players[playerKey(s)] ??= { freeSpins: null, lastBalance: null });
 const newRoundId = () => `R${Date.now().toString(36).toUpperCase()}${randomBytes(3).toString('hex').toUpperCase()}`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -127,13 +141,14 @@ async function handleSession(session, res) {
     const body = await wallet(session.operatorId, 'balance', { playerId: session.playerId });
     remember(session, body.balance);
     save();
-    return json(res, 200, { playerName: session.playerName, credits: body.balance, freeSpins: player.freeSpins });
+    return json(res, 200, { playerName: session.playerName, gameId: session.gameId ?? 'wild-frontier', credits: body.balance, freeSpins: player.freeSpins });
   } catch (error) {
     return json(res, 502, { error: `读取平台余额失败：${error.message}` });
   }
 }
 
 async function handleSpin(session, input, res) {
+  if (session.gameId === 'mahjong-cascade') return handleMahjongSpin(session, input, res);
   const key = playerKey(session);
   if (busy.has(key)) return json(res, 409, { error: '上一局还在处理中。' });
   busy.add(key);
@@ -186,7 +201,7 @@ async function handleSpin(session, input, res) {
     const winTransactionId = `${roundId}-win`;
     rounds.add({
       roundId, parentRoundId: mode === 'free' ? triggerRoundId : null, at: new Date().toISOString(),
-      ...base, mode, bet, stops: outcome.stops, multipliers: outcome.multipliers,
+      ...base, gameId: 'wild-frontier', mode, bet, stops: outcome.stops, multipliers: outcome.multipliers,
       payout: outcome.payout, capped: outcome.capped, freeSpinsAwarded: outcome.freeSpinsAwarded,
       maxWinMultiplier, engineVersion: ENGINE_VERSION, betTransactionId, winTransactionId, status: 'win-pending',
     });
@@ -230,19 +245,67 @@ async function handleSpin(session, input, res) {
   }
 }
 
+async function handleMahjongSpin(session, input, res) {
+  const key = playerKey(session);
+  if (busy.has(key)) return json(res, 409, { error: 'Previous round is still being processed.' });
+  busy.add(key);
+  try {
+    const player = playerState(session);
+    if (player.freeSpins && player.freeSpins.bet !== 10_000) player.freeSpins = null;
+    const bet = player.freeSpins ? player.freeSpins.bet : Number(input.bet);
+    if (!player.freeSpins && bet !== 10_000) return json(res, 400, { error: 'Invalid mahjong bet.' });
+    const roundId = newRoundId();
+    const mode = player.freeSpins ? 'free' : 'paid';
+    const base = { operatorId: session.operatorId, playerId: session.playerId };
+    let betTransactionId = null;
+    if (mode === 'paid') {
+      betTransactionId = `${roundId}-bet`;
+      try { remember(session, (await wallet(session.operatorId, 'bet', { ...base, transactionId: betTransactionId, roundId, amount: bet, currency: 'DEMO' }, BET_DELAYS, BET_TIMEOUT_MS)).balance); }
+      catch (error) {
+        if (error.definitive) return json(res, error.status === 402 ? 402 : 400, { error: error.message, code: error.code });
+        const refund = { action: 'refund', ...base, payload: { ...base, transactionId: `${roundId}-refund`, refTransactionId: betTransactionId, roundId } };
+        try { remember(session, (await wallet(session.operatorId, 'refund', refund.payload)).balance); } catch (refundError) { queue({ ...refund, lastError: refundError.message }); }
+        save(); return json(res, 502, { error: 'Bet unconfirmed; round cancelled.', code: 'BET_UNCONFIRMED' });
+      }
+    }
+    const capRemainingBefore = player.freeSpins ? Math.max(0, bet * MAHJONG_MAX_WIN_MULTIPLIER - player.freeSpins.totalWin) : bet * MAHJONG_MAX_WIN_MULTIPLIER;
+    const outcome = settleMahjongSpin(MAHJONG_MATH_CONFIG.strips.map((strip) => randomInt(strip.length)), bet, MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable, { mode, capRemainingBefore });
+    const triggerRoundId = player.freeSpins?.triggerRoundId ?? null;
+    let freeSpinsFinished = null;
+    if (player.freeSpins) {
+      const free = player.freeSpins;
+      free.remaining += outcome.freeSpinsAwarded - 1; free.played += 1; free.totalWin += outcome.payout;
+      if (free.remaining === 0 || outcome.capped) { freeSpinsFinished = { played: free.played, totalWin: free.totalWin }; player.freeSpins = null; }
+    } else if (outcome.freeSpinsAwarded > 0) {
+      player.freeSpins = { bet, remaining: outcome.freeSpinsAwarded, played: 0, totalWin: outcome.payout, triggerRoundId: roundId };
+    }
+    const winTransactionId = `${roundId}-win`;
+    rounds.add({ roundId, parentRoundId: mode === 'free' ? triggerRoundId : null, at: new Date().toISOString(), ...base, gameId: 'mahjong-cascade', mode, bet, stops: outcome.stops, replayInput: outcome.replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, freeSpinsAwarded: outcome.freeSpinsAwarded, maxWinMultiplier: MAHJONG_MAX_WIN_MULTIPLIER, engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision, betTransactionId, winTransactionId, status: 'win-pending' });
+    const winCall = { action: 'win', ...base, payload: { ...base, transactionId: winTransactionId, roundId, amount: outcome.payout, currency: 'DEMO' } };
+    let settlementPending = false;
+    try { const body = await wallet(session.operatorId, 'win', winCall.payload); remember(session, body.balance); rounds.settle(roundId, body.balance); }
+    catch (error) { settlementPending = true; queue({ ...winCall, lastError: error.message }); if (player.lastBalance !== null) player.lastBalance += outcome.payout; }
+    save();
+    return json(res, 200, { gameId: 'mahjong-cascade', engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision, roundId, mode, bet, stops: outcome.stops, replayInput: outcome.replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, credits: player.lastBalance, settlementPending, freeSpinsAwarded: outcome.freeSpinsAwarded, freeSpins: player.freeSpins, freeSpinsFinished });
+  } finally { busy.delete(key); }
+}
+
 // ---------- provider API (called by operators, signed) ----------
 function handleLaunch(raw, req, res) {
   const operatorId = String(req.headers['x-operator-id'] ?? '');
   const operator = OPERATORS[operatorId];
   if (!operator || !verify(raw, req.headers['x-signature'], operator.secret)) return json(res, 401, { code: 'BAD_SIGNATURE', error: '签名不对，拒绝处理' });
   const input = parseJson(raw);
+  const gameId = String(input.gameId ?? 'wild-frontier');
+  const game = gameFor(gameId);
+  if (!game) return json(res, 400, { code: 'UNKNOWN_GAME', error: 'Unknown or unavailable game.' });
   if (!input.playerId) return json(res, 400, { code: 'BAD_REQUEST', error: '缺少 playerId' });
   // Drop expired sessions while we are here.
   for (const [token, s] of Object.entries(state.sessions)) if (Date.now() - Date.parse(s.createdAt) > SESSION_TTL_MS) delete state.sessions[token];
   const token = randomBytes(24).toString('base64url');
-  state.sessions[token] = { operatorId, playerId: String(input.playerId), playerName: String(input.playerName ?? input.playerId), createdAt: new Date().toISOString() };
+  state.sessions[token] = { operatorId, playerId: String(input.playerId), playerName: String(input.playerName ?? input.playerId), gameId, createdAt: new Date().toISOString() };
   save();
-  return json(res, 200, { token, gameUrl: `${gameWebUrl}/?token=${token}`, expiresInSeconds: SESSION_TTL_MS / 1000 });
+  return json(res, 200, { token, gameId, gameUrl: `${gameWebUrl}${game.launchPath}?token=${token}`, expiresInSeconds: SESSION_TTL_MS / 1000 });
 }
 
 function handleRoundLookup(raw, req, res) {
@@ -257,11 +320,15 @@ function handleRoundLookup(raw, req, res) {
   if (roundId) {
     const round = rounds.get(String(roundId));
     if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
-    const replayed = replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
-    return json(res, 200, { round, replay: { payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, matches: replayed.payout === round.payout && round.engineVersion === ENGINE_VERSION } });
+    const gameId = round.gameId ?? 'wild-frontier';
+    const replayed = gameId === 'mahjong-cascade'
+      ? replayMahjongSpin(round.replayInput)
+      : replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
+    const expectedVersion = gameId === 'mahjong-cascade' ? 'mahjong-engine-1.2.0' : ENGINE_VERSION;
+    return json(res, 200, { round, replay: { gameId, payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, cascadeSteps: gameId === 'mahjong-cascade' ? replayed.cascadeSteps : undefined, matches: replayed.payout === round.payout && round.engineVersion === expectedVersion } });
   }
   const records = rounds.list((round) => ownsRound(round), Math.min(Math.max(Number(limit) || 50, 1), 500))
-    .map((round) => ({ roundId: round.roundId, at: round.at, bet: round.bet, payout: round.payout, ...(wholeOperator ? { playerId: round.playerId, mode: round.mode, status: round.status } : {}) }));
+    .map((round) => ({ roundId: round.roundId, gameId: round.gameId ?? 'wild-frontier', at: round.at, bet: round.bet, payout: round.payout, ...(wholeOperator ? { playerId: round.playerId, mode: round.mode, status: round.status } : {}) }));
   return json(res, 200, { records });
 }
 

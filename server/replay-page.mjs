@@ -3,6 +3,7 @@
 // the same result. Customer support and the operator open it by round ID.
 
 import { ENGINE_VERSION, replaySpin } from '../src/engine/index.ts';
+import { MAHJONG_MATH_CONFIG, replaySpin as replayMahjongSpin } from '../src/mahjong/engine/index.ts';
 import { escapeHtml } from './http.mjs';
 
 const NAMES = { bull: '水牛', lion: '狮子', elephant: '大象', zebra: '斑马', deer: '羚羊', coin: '金币', wild: '百搭' };
@@ -10,6 +11,7 @@ const name = (id) => NAMES[id] ?? id;
 const fmt = (n) => Number(n).toLocaleString('zh-CN');
 
 export function replayPage(round, imageBase) {
+  if (round?.gameId === 'mahjong-cascade') return mahjongReplayPage(round);
   if (!round) return page('找不到这一局', '<p class="lead">没有这个局号的开奖记录。如果平台流水里这一局只有"扣款 + 回滚"，说明扣款没有及时确认，这一局在开奖前就取消了。</p>');
 
   let check;
@@ -54,6 +56,17 @@ export function replayPage(round, imageBase) {
   ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
 
   return page(`回放 ${round.roundId}`, `${check}<div class="layout">${grid}<div><h2>中奖</h2>${wins}</div></div><h2>记录</h2><table>${rows}</table>`);
+}
+
+function mahjongReplayPage(round) {
+  try {
+    const outcome = replayMahjongSpin(round.replayInput);
+    const same = outcome.payout === round.payout && JSON.stringify(outcome.cascadeSteps) === JSON.stringify(round.cascadeSteps)
+      && round.engineVersion === 'mahjong-engine-1.2.0' && round.mathConfigVersion === MAHJONG_MATH_CONFIG.version && round.stripRevision === MAHJONG_MATH_CONFIG.stripRevision;
+    const board = (value) => `<div class="mahjong-board">${value.map((column) => `<div>${column.map((tile) => `<i>${escapeHtml(tile.symbolId)}${tile.golden ? ' 金' : ''}</i>`).join('')}</div>`).join('')}</div>`;
+    const steps = outcome.cascadeSteps.map((step, index) => `<article><h3>第 ${index + 1} 段消除连锁</h3>${board(step.beforeBoard)}<p>倍数 ×${step.cascadeMultiplier}；候选 ${fmt(step.candidatePayout)}；派彩 ${fmt(step.payout)}${step.capped ? '（封顶）' : ''}</p><p>金色变百搭：${step.goldenTransforms.length} 张；消除：${step.removed.length} 张；补牌：${step.refills.flat().length} 张</p>${board(step.afterBoard)}</article>`).join('') || '<p>本次无消除连锁。</p>';
+    return page('麻将连连胡回放', `<p class="${same ? 'ok' : 'bad'}">${same ? '✓ 按记录停点、版本及每一步连锁重算，结果完全一致。' : '✗ 回放与记录不一致或规则版本不可用。'}</p><p>局号：${escapeHtml(round.roundId)} · ${round.mode === 'free' ? '免费旋转' : '付费旋转'} · 投注 ${fmt(round.bet)} · 派彩 ${fmt(round.payout)} · 胡 ${round.huCount}</p><h2>初始牌面</h2>${board(outcome.initialBoard)}<h2>连锁过程</h2>${steps}<h2>最终牌面</h2>${board(outcome.finalBoard)}`);
+  } catch (error) { return page('麻将连连胡回放', `<p class="bad">✗ 记录无法重现：${escapeHtml(error.message)}</p>`); }
 }
 
 function page(title, body) {

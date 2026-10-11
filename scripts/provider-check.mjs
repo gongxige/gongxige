@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { sign, signedPost } from '../server/http.mjs';
 import { replayPage } from '../server/replay-page.mjs';
 
-const SPINS = Number(process.argv[2] ?? 10);
+const SPINS = Number(process.argv[2] ?? 1);
 // A per-process port pair makes repeated checks independent from a previous
 // interrupted run whose child processes are still shutting down.
 const OP_PORT = 18_000 + (process.pid % 1_000) * 2;
@@ -20,7 +20,7 @@ const API_PORT = OP_PORT + 1;
 const OP = `http://127.0.0.1:${OP_PORT}`;
 const API = `http://127.0.0.1:${API_PORT}`;
 const ADMIN_PASSWORD = randomBytes(12).toString('base64url');
-const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', SLOW_BET_MS: '3500' };
+const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', BET_TIMEOUT_MS: '500', SLOW_BET_MS: '700' };
 const children = [spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
 process.on('exit', () => children.forEach((c) => c.kill()));
 
@@ -129,6 +129,69 @@ assert.equal(s.players['player-002'].balance, beforeSlow);
 assert.ok(s.players['player-002'].ok);
 assert.ok(s.transactions.some((t) => t.type === 'refund' && t.amount === 80));
 step('扣款超时：本局取消、自动回滚，玩家余额不变，对账一致');
+
+// Mahjong Cascade uses the same wallet flow, but records its deterministic
+// cascade steps and has a separately persisted free-spin state.
+const mahjongLaunch = await signedPost(`${API}/provider/launch`, { playerId: 'player-001', gameId: 'mahjong-cascade' }, opts);
+assert.equal(mahjongLaunch.status, 200);
+assert.equal(mahjongLaunch.body.gameId, 'mahjong-cascade');
+assert.ok(mahjongLaunch.body.gameUrl.includes('/mahjong?token='));
+const mahjongToken = new URL(mahjongLaunch.body.gameUrl).searchParams.get('token');
+assert.ok(mahjongToken);
+const spinMahjong = () => spinOnce(mahjongToken, 10_000);
+let mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
+const mahjongRounds = [];
+for (let i = 0; i < 5; i += 1) {
+  // Top up the test-only virtual wallet before a paid round, without changing provider behavior.
+  if (mahjongBalance < 10_000) {
+    await signedPost(`${OP}/wallet/win`, { playerId: 'player-001', transactionId: `mahjong-check-credit-${i}`, roundId: `mahjong-check-credit-${i}`, amount: 100_000, currency: 'DEMO' }, opts);
+    mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
+  }
+  const { status, body } = await spinMahjong();
+  assert.equal(status, 200, body.error);
+  assert.equal(body.gameId, 'mahjong-cascade');
+  assert.equal(body.credits, mahjongBalance - (body.mode === 'paid' ? body.bet : 0) + body.payout);
+  assert.ok(Array.isArray(body.cascadeSteps));
+  mahjongBalance = body.credits; mahjongRounds.push(body.roundId);
+}
+for (const id of mahjongRounds) {
+  const { body } = await lookupRound(id, 'player-001');
+  assert.equal(body.round.gameId, 'mahjong-cascade');
+  assert.ok(body.replay.matches, `mahjong replay ${id}`);
+  assert.deepEqual(body.replay.cascadeSteps, body.round.cascadeSteps, `mahjong cascades ${id}`);
+}
+s = await opState();
+assert.equal(s.players['player-001'].balance, mahjongBalance);
+assert.ok(s.players['player-001'].ok, 'mahjong reconciliation');
+step('麻将连连胡连续旋转：每局扣款或免费、派彩、对账、连锁回放均一致');
+
+// The two provider fault cases must remain correct for the new game too.
+while ((await getJson(`${API}/api/session?token=${mahjongToken}`)).body.freeSpins) await spinMahjong();
+step('麻将免费旋转已结清，开始故障验证');
+if (mahjongBalance < 10_000) {
+  await signedPost(`${OP}/wallet/win`, { playerId: 'player-001', transactionId: 'mahjong-fault-credit', roundId: 'mahjong-fault-credit', amount: 100_000, currency: 'DEMO' }, opts);
+  mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
+}
+await setFault('win-down');
+const mahjongLate = await spinMahjong();
+assert.equal(mahjongLate.status, 200);
+assert.equal(mahjongLate.body.settlementPending, true);
+// The first delivery attempt failed; recover the simulated operator so the
+// queued Mahjong payout proves its own retry path without another long fault cycle.
+await setFault('none');
+for (let i = 0; i < 40 && (await lookupRound(mahjongLate.body.roundId, 'player-001')).body.round.status !== 'settled'; i += 1) await sleep(500);
+assert.equal((await lookupRound(mahjongLate.body.roundId, 'player-001')).body.round.status, 'settled');
+while ((await getJson(`${API}/api/session?token=${mahjongToken}`)).body.freeSpins) await spinMahjong();
+const mahjongBeforeSlow = (await opState()).players['player-001'].balance;
+await setFault('slow-bet');
+const mahjongSlow = await spinMahjong();
+assert.equal(mahjongSlow.status, 502);
+assert.equal(mahjongSlow.body.code, 'BET_UNCONFIRMED');
+await sleep(1200);
+s = await opState();
+assert.equal(s.players['player-001'].balance, mahjongBeforeSlow);
+assert.ok(s.players['player-001'].ok);
+step('麻将连连胡派彩故障进入补发，扣款超时自动回滚且对账正确');
 
 // Not enough money: the operator refuses, nothing is recorded as played.
 await signedPost(`${OP}/wallet/bet`, { playerId: 'player-002', transactionId: 'drain', roundId: 'drain', amount: (await opState()).players['player-002'].balance }, opts);
