@@ -148,7 +148,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 
 需求见 [MAHJONG_TASK.md](MAHJONG_TASK.md)。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-23 ~ STEP-31 由 `npm run autopilot` 自动开发，进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
-- [ ] STEP-23 设计文档
+- [x] STEP-23 设计文档（2026-10-12）
 - [ ] STEP-24 引擎：盘面、2000 赢法、消除连锁、倍数
 - [ ] STEP-25 引擎：金色牌变百搭、"胡"与免费旋转、最高赢分
 - [ ] STEP-26 数学调校：RTP 96.95%、中等波动
