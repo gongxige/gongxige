@@ -18,8 +18,8 @@ function runUntilLanded(motion: ReelMotion, from: number): { positions: number[]
 }
 
 describe('ReelMotion', () => {
-  it('uses the slower, readable spin speed', () => {
-    assert.ok(SPIN_SPEED >= 0.012 && SPIN_SPEED <= 0.014, `spin speed is ${SPIN_SPEED} symbols/ms`);
+  it('spins at a readable but lively speed (user tuned 2026-10-12: 13/s felt too slow)', () => {
+    assert.ok(SPIN_SPEED >= 0.016 && SPIN_SPEED <= 0.018, `spin speed is ${SPIN_SPEED} symbols/ms`);
   });
 
   it('reaches full speed after the acceleration phase', () => {

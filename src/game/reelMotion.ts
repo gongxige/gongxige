@@ -8,7 +8,7 @@
 // Pure time maths, no DOM, so it is unit-tested directly.
 
 /** Full speed, in symbols per millisecond. */
-export const SPIN_SPEED = 0.013;
+export const SPIN_SPEED = 0.017;
 /** Short run-up, so the first reel can land about 0.8 s after pressing spin (reference ≈ 0.5 s). */
 export const ACCEL_MS = 120;
 /** Deceleration always covers at least this many symbols, so the landing symbols are placed off-screen. */
