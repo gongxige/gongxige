@@ -56,6 +56,9 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .icon-button:not(:disabled):hover { filter: brightness(1.15); }
 .icon-button:disabled { opacity: .55; }
 .game-demo-notice { position: absolute; inset: auto 8% 4% 8%; display: block; color: #fff2c3; font: 600 1.05cqw/1.1 system-ui, "Microsoft YaHei", sans-serif; letter-spacing: .04cqw; text-align: center; white-space: nowrap; }
+.settings-menu { position: absolute; right: 1.5%; top: 6.2cqw; z-index: 20; display: grid; min-width: 12cqw; overflow: hidden; border: .16cqw solid var(--gold); border-radius: .6cqw; background: #2a0640; box-shadow: 0 .5cqw 1.2cqw #000b; }
+.settings-menu button, .settings-menu a { padding: .7cqw 1.1cqw; border: 0; border-bottom: 1px solid #ffffff22; background: transparent; color: #fff2c3; font: 700 1.25cqw system-ui, sans-serif; text-align: left; text-decoration: none; }
+.settings-menu button:hover, .settings-menu a:hover { background: #8a1f9e; }
 
 /* ---------- Reel frame ---------- */
 .reel-frame { position: absolute; left: 9.6%; top: 17.6%; width: 82.05%; height: 68.6%; border-radius: .9cqw; background: linear-gradient(160deg, var(--gold-hi), var(--gold) 18%, var(--gold-deep) 42%, #6b3708 55%, var(--gold) 78%, var(--gold-hi)); box-shadow: 0 0 2.4cqw #000c, 0 0 1cqw #f3c75c66, inset 0 0 .5cqw #5a2a00; }
@@ -106,6 +109,16 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
 /* ---------- Bottom control bar ---------- */
 .control-bar { position: absolute; inset: auto 0 0 0; height: 11.6%; display: flex; align-items: center; gap: 2cqw; padding: 0 1cqw; z-index: 3; background: linear-gradient(#7a1a92, #4a0c62 45%, var(--purple-deep)); border-top: .25cqw solid var(--gold); box-shadow: 0 -.4cqw 1.2cqw #000a; }
+.utility-button { height: 4.6cqw; border: .2cqw solid #fff1ae; border-radius: .9cqw; background: linear-gradient(#ffe981, #e4a318 52%, #9b5707); color: #4a2000; font: 900 1.5cqw/1 system-ui, sans-serif; text-shadow: 0 .08cqw 0 #fff7c7; box-shadow: inset 0 .22cqw 0 #fff8cb, 0 .3cqw .5cqw #0008; }
+.utility-button:active:not(:disabled) { transform: translateY(.18cqw); box-shadow: inset 0 .1cqw .35cqw #633600, 0 .1cqw .25cqw #0008; }
+.info-button { width: 4.6cqw; border-radius: 50%; background: linear-gradient(#9edcff, #3b8be2 52%, #1e4f9c); color: #fff; text-shadow: 0 .12cqw 0 #14336d; }
+.max-button { width: 6.5cqw; }
+.auto-wrap { position: relative; }
+.auto-button { min-width: 7.4cqw; background: linear-gradient(#a8e4ff, #438fe0 52%, #22549e); color: #fff; text-shadow: 0 .12cqw 0 #13366e; }
+.auto-button.is-active { background: linear-gradient(#ffdf70, #f09618 52%, #a74b04); }
+.auto-menu { position: absolute; right: 0; bottom: calc(100% + .6cqw); z-index: 20; display: grid; width: 7.4cqw; overflow: hidden; border: .16cqw solid #dff4ff; border-radius: .7cqw; background: #173d80; box-shadow: 0 .4cqw .9cqw #000b; }
+.auto-menu button { padding: .5cqw; border: 0; border-bottom: 1px solid #ffffff22; background: transparent; color: #fff; font: 800 1.2cqw system-ui, sans-serif; }
+.auto-menu button:hover { background: #4a9fe9; }
 .bet-group { display: flex; align-items: center; gap: .6cqw; }
 .bet-label { font-size: 1.4cqw; font-weight: 700; color: #ffe9a8; margin-right: .4cqw; }
 .step-button { width: 5cqw; height: 4.6cqw; border-radius: .9cqw; border: .2cqw solid #bfe6ff; background: linear-gradient(#8fd0ff, #2f7fd6 55%, #1b4f9a); font: 800 3cqw/1 system-ui, sans-serif; text-shadow: 0 .15cqw 0 #0a2d60; box-shadow: inset 0 .2cqw 0 #ffffff88, 0 .3cqw .5cqw #0007; }
@@ -118,11 +131,12 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .win-panel.is-winning { border-color: var(--gold); animation: panel-glow .5s ease-in-out infinite alternate; }
 @keyframes panel-glow { from { box-shadow: inset 0 0 1.2cqw #000c, 0 0 .4cqw #ffd84d55; } to { box-shadow: inset 0 0 1.2cqw #000c, 0 0 1.4cqw #ffd84daa; } }
 
-.spin-button { width: 19cqw; height: 80%; border-radius: 1.4cqw; border: .25cqw solid #ffc2c2; background: linear-gradient(#ff6b6b, #d4142f 50%, #8a0018); font: 900 3cqw/1 system-ui, "Microsoft YaHei", sans-serif; letter-spacing: .8cqw; text-shadow: 0 .2cqw 0 #5a0010; box-shadow: inset 0 .3cqw 0 #ffffff77, 0 .4cqw .8cqw #000a; transition: filter .15s, transform .08s; }
+.spin-button { width: 19cqw; height: 80%; display: grid; place-content: center; gap: .35cqw; border-radius: 1.4cqw; border: .25cqw solid #d5ffbf; background: linear-gradient(#b5ff7d, #42b924 50%, #16720f); font: 900 3cqw/1 system-ui, "Microsoft YaHei", sans-serif; letter-spacing: .5cqw; text-shadow: 0 .2cqw 0 #155c0d; box-shadow: inset 0 .3cqw 0 #ffffff88, 0 .4cqw .8cqw #000a; transition: filter .15s, transform .08s; }
+.spin-button small { font: 700 .9cqw/1 system-ui, "Microsoft YaHei", sans-serif; letter-spacing: 0; color: #eaffd8; text-shadow: none; }
 .spin-button:not(:disabled):hover { filter: brightness(1.12); }
 .spin-button:not(:disabled):active { transform: translateY(.2cqw) scale(.98); }
 .spin-button:disabled { filter: grayscale(.7) brightness(.7); }
-.spin-button.is-spinning { background: linear-gradient(#ffb36b, #d46a14 50%, #8a3a00); border-color: #ffe0b8; }
+.spin-button.is-spinning { background: linear-gradient(#ff7777, #df2634 50%, #920014); border-color: #ffd1d1; text-shadow: 0 .2cqw 0 #69000e; }
 .spin-button.is-win { background: linear-gradient(#b8ff7a, #3da91c 55%, #1d7310); border-color: #e6ffcb; text-shadow: 0 .2cqw 0 #1c6412; animation: green-button-pulse .65s ease-in-out infinite alternate; }
 @keyframes green-button-pulse { from { filter: brightness(.96); } to { filter: brightness(1.16); } }
 

@@ -4,6 +4,7 @@ import { REEL_STRIPS, ROWS, SCATTER, gridFromStops, windowAt } from '../engine/i
 import { ACCEL_MS, MIN_STOP_DISTANCE, OVERSHOOT, ReelMotion, SPIN_SPEED } from './reelMotion.ts';
 import { ReelTape } from './reelTape.ts';
 import { ANTICIPATION_SLOW_MS, ANTICIPATION_SPIN_MS, FIRST_STOP_MS, STOP_INTERVAL_MS, SpinController } from './spinController.ts';
+import { AutoSpinController, highestAllowedBet, isAutoSpinLongPress, LONG_PRESS_MS, type AutoStopReason } from './autoSpin.ts';
 
 /** Run the motion frame by frame (60fps) until it lands; returns every position seen. */
 function runUntilLanded(motion: ReelMotion, from: number): { positions: number[]; landedAt: number } {
@@ -187,5 +188,30 @@ describe('SpinController', () => {
     }
     assert.ok(!controller.isSpinning);
     controller.motions.forEach((motion) => assert.ok(Number.isInteger(motion.position)));
+  });
+});
+
+describe('AutoSpinController', () => {
+  it('counts down every reserved spin and MAX always means the highest offered bet', () => {
+    const auto = new AutoSpinController();
+    auto.start(3);
+    assert.equal(highestAllowedBet([40, 80, 200, 400]), 400, 'MAX selects the highest allowed bet');
+    assert.deepEqual([auto.takeSpin(), auto.remaining, auto.takeSpin(), auto.remaining, auto.takeSpin(), auto.remaining], [true, 2, true, 1, true, 0]);
+    assert.equal(auto.takeSpin(), false);
+  });
+
+  for (const reason of ['insufficient-funds', 'free-spins', 'request-error', 'player-stopped'] as const satisfies readonly AutoStopReason[]) {
+    it(`stops immediately for ${reason}`, () => {
+      const auto = new AutoSpinController();
+      auto.start(50);
+      auto.stop(reason);
+      assert.equal(auto.active, false);
+      assert.equal(auto.takeSpin(), false);
+    });
+  }
+
+  it('recognises a 0.6 second SPIN hold as automatic play', () => {
+    assert.equal(isAutoSpinLongPress(LONG_PRESS_MS - 1), false);
+    assert.equal(isAutoSpinLongPress(LONG_PRESS_MS), true);
   });
 });

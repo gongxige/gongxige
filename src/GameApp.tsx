@@ -7,6 +7,7 @@ import { RulesModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
 import { BigWin, bigWinTier } from './ui/BigWin.tsx';
 import { useWinCycle } from './useWinCycle.ts';
+import { highestAllowedBet, LONG_PRESS_MS } from './game/autoSpin.ts';
 
 type Config = { engineVersion?: string; protocol?: string; title: string; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; lobbyUrl?: string };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
@@ -91,6 +92,10 @@ export default function GameApp() {
   // No valid session (opened without ?token= or it expired): the player must come in through the operator's lobby.
   const [noSession, setNoSession] = useState(false);
   const [roundId, setRoundId] = useState('');
+  const [autoRemaining, setAutoRemaining] = useState<number | null>(null);
+  const [insufficientFunds, setInsufficientFunds] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heldSpin = useRef(false);
   const displayWin = useCountUp(win.amount, win.bet);
   const inFreeSpins = freeSpins !== null;
 
@@ -110,12 +115,18 @@ export default function GameApp() {
     })().catch((e: Error) => { if (e instanceof ApiError && e.code === 'SESSION_INVALID') setNoSession(true); else setError(e.message); });
   }, []);
 
-  const spin = () => {
-    if (spinning) { reels.quickStop(); return; }
+  const spin = (automatic = false) => {
+    if (spinning) { if (!automatic) setAutoRemaining(null); reels.quickStop(); return; }
+    if (!automatic && autoRemaining !== null) { setAutoRemaining(null); setMessage('自动旋转已停止'); return; }
     if (!config || modal || overlay || celebrating || staleApi || noSession) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
-    if (!freeSpins && credits < bet) { setError('平台余额不足。'); return; }
+    if (!freeSpins && credits < bet) { setAutoRemaining(null); setInsufficientFunds(true); return; }
+
+    if (automatic) {
+      if (autoRemaining === null || autoRemaining <= 0) return;
+      setAutoRemaining(autoRemaining - 1);
+    }
 
     setError('');
     setWin({ amount: 0, bet: spinBet, wins: [] });
@@ -127,12 +138,13 @@ export default function GameApp() {
     let result: SpinResult | null = null;
     reels.start(() => {
       setSpinning(false);
-      if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
+      if (!result) { setAutoRemaining(null); loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
       setRoundId(result.roundId);
       setWin({ amount: result.payout, bet: result.bet, wins: result.wins });
       if (result.mode === 'free' && result.multipliers) reels.showMultipliers(result.multipliers);
       setFreeSpins(result.freeSpins ?? null);
+      if (result.freeSpins) setAutoRemaining(null);
       setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');
       if (result.settlementPending) setError('平台派彩稍有延迟，赢分会自动到账。');
@@ -150,6 +162,7 @@ export default function GameApp() {
         reels.setResult(body.stops);
       })
       .catch((e: Error) => {
+        setAutoRemaining(null);
         if (e instanceof ApiError && e.code === 'SESSION_INVALID') setNoSession(true); else setError(e.message);
         reels.setResult(null);
       });
@@ -162,12 +175,25 @@ export default function GameApp() {
     return () => clearTimeout(timer);
   }, [spinning, overlay, celebrating, modal, freeSpins, win.amount]);
 
+  // Paid auto spins start only after the prior result is settled. This keeps a
+  // stale local balance from ever submitting an extra wager.
+  useEffect(() => {
+    if (autoRemaining === null || spinning || overlay || celebrating || modal) return;
+    if (freeSpins) { setAutoRemaining(null); return; }
+    if (autoRemaining <= 0) { setAutoRemaining(null); return; }
+    if (credits < bet) { setAutoRemaining(null); setInsufficientFunds(true); return; }
+    const timer = setTimeout(() => spinRef.current(true), 280);
+    return () => clearTimeout(timer);
+  }, [autoRemaining, spinning, overlay, celebrating, modal, freeSpins, credits, bet]);
+
   // Dev-only preview of the celebration: /?preview-bigwin=30 shows a 30× bet win.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const multiple = Number(new URLSearchParams(location.search).get('preview-bigwin'));
     if (multiple > 0) { setWin({ amount: multiple * ALLOWED_BETS[1], bet: ALLOWED_BETS[1], wins: [] }); setCelebrating(true); }
   }, []);
+
+  useEffect(() => () => { if (holdTimer.current) clearTimeout(holdTimer.current); }, []);
 
   const endCelebration = useCallback(() => {
     setCelebrating(false);
@@ -201,13 +227,13 @@ export default function GameApp() {
   const highlightKey = cycle ? cycle.cells.join(',') : '';
   useEffect(() => { reels.highlight(highlightKey ? highlightKey.split(',') : null); }, [highlightKey, reels.highlight]);
   // During free spins the button only works as "stop".
-  const spinDisabled = !config || staleApi || noSession || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
+  const spinDisabled = !config || staleApi || noSession || (!spinning && autoRemaining === null && (inFreeSpins || overlay !== null || celebrating || credits < bet));
   const shownBet = freeSpins ? freeSpins.bet : bet;
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
   return <main className="game-shell">
     <section className={`stage ${showWin ? 'has-win' : ''} ${inFreeSpins ? 'is-free' : ''}`} aria-label="Wild Frontier 1024 Ways">
-      <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} disabled={spinning || inFreeSpins} onRules={() => setModal('rules')} />
+      <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} onRules={() => setModal('rules')} />
       <div className="reel-frame" aria-hidden="true" />
       <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
       <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
@@ -227,8 +253,9 @@ export default function GameApp() {
       {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
       {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href="/">打开平台大厅</a></div>}
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
-      <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
+      <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} autoRemaining={autoRemaining} onRules={() => setModal('rules')} onMax={() => setBet(highestAllowedBet(config?.allowedBets ?? ALLOWED_BETS))} onAuto={(count) => { if (count) { if (credits < bet) { setInsufficientFunds(true); return; } setAutoRemaining(count); } else setAutoRemaining(null); }} onSpinHoldStart={() => { heldSpin.current = false; holdTimer.current = setTimeout(() => { heldSpin.current = true; if (!spinning && !inFreeSpins && credits >= bet) setAutoRemaining(50); }, LONG_PRESS_MS); }} onSpinHoldEnd={() => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; }} onSpin={() => { if (!heldSpin.current) spin(); heldSpin.current = false; }} />
       {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
+      {insufficientFunds && <div className="modal-backdrop" role="alertdialog" aria-modal="true" aria-label="余额不足"><section className="modal-card insufficient-card"><h2>提示</h2><p>余额不足，请回大厅充值</p><div className="modal-actions"><button type="button" onClick={() => setInsufficientFunds(false)}>确定</button><a className="primary" href="/">返回大厅</a></div></section></div>}
     </section>
   </main>;
 }
