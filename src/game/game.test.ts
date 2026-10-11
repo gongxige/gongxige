@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { REEL_STRIPS, ROWS, gridFromStops } from '../engine/index.ts';
+import { REEL_STRIPS, ROWS, SCATTER, gridFromStops, windowAt } from '../engine/index.ts';
 import { ACCEL_MS, MIN_STOP_DISTANCE, OVERSHOOT, ReelMotion, SPIN_SPEED } from './reelMotion.ts';
 import { ReelTape } from './reelTape.ts';
-import { FIRST_STOP_MS, STOP_INTERVAL_MS, SpinController } from './spinController.ts';
+import { ANTICIPATION_SLOW_MS, ANTICIPATION_SPIN_MS, FIRST_STOP_MS, STOP_INTERVAL_MS, SpinController } from './spinController.ts';
 
 /** Run the motion frame by frame (60fps) until it lands; returns every position seen. */
 function runUntilLanded(motion: ReelMotion, from: number): { positions: number[]; landedAt: number } {
@@ -129,6 +129,52 @@ describe('SpinController', () => {
     }
     assert.ok(now < FIRST_STOP_MS + 4 * STOP_INTERVAL_MS, `finished at ${now}`);
     assert.deepEqual(visibleGrid(controller), gridFromStops(stops));
+  });
+
+  // Real strip positions whose visible window has exactly one coin, or none.
+  const coinsAt = (reel: number, stop: number) => windowAt(reel, stop).filter((id) => id === SCATTER).length;
+  const stopWith = (reel: number, coins: number) => REEL_STRIPS[reel].findIndex((_, stop) => coinsAt(reel, stop) === coins);
+
+  it('after two coins, each later reel waits with a long, slow stop ("waiting for the third coin")', () => {
+    const stops = [stopWith(0, 1), stopWith(1, 1), stopWith(2, 0), stopWith(3, 0), stopWith(4, 1)];
+    const controller = new SpinController([0, 0, 0, 0, 0]);
+    controller.start(0);
+    const landings: number[] = [];
+    const waiting = new Set<number>();
+    let now = 0;
+    for (; now < 20_000; now += 16) {
+      if (now >= 100) controller.setResult(stops, now);
+      const { landedReels, allLanded } = controller.tick(now);
+      landedReels.forEach(() => landings.push(now));
+      if (controller.anticipatingReel !== null) waiting.add(controller.anticipatingReel);
+      if (allLanded) break;
+    }
+    assert.deepEqual([...waiting], [2, 3, 4], 'reels after the second coin anticipate one at a time');
+    assert.deepEqual(visibleGrid(controller), gridFromStops(stops), 'still lands on the server stops');
+    for (const reel of [2, 3, 4]) {
+      const gap = landings[reel] - landings[reel - 1];
+      assert.ok(gap >= ANTICIPATION_SPIN_MS + ANTICIPATION_SLOW_MS - 200, `reel ${reel} waited only ${gap}ms`);
+    }
+    assert.ok(landings[1] - landings[0] < STOP_INTERVAL_MS + 2 / SPIN_SPEED + 32, 'reels before the second coin stop normally');
+    assert.equal(controller.anticipatingReel, null);
+  });
+
+  it('no anticipation with fewer than two coins, and quick stop never skips it', () => {
+    const none = [stopWith(0, 1), stopWith(1, 0), stopWith(2, 0), stopWith(3, 0), stopWith(4, 0)];
+    const plain = spinTo(none, 100);
+    assert.ok(plain.finishedAt < FIRST_STOP_MS + 4 * STOP_INTERVAL_MS + 800, `finished at ${plain.finishedAt}`);
+
+    const two = [stopWith(0, 1), stopWith(1, 1), stopWith(2, 0), stopWith(3, 0), stopWith(4, 0)];
+    const controller = new SpinController([0, 0, 0, 0, 0]);
+    controller.start(0);
+    let now = 0;
+    for (; now < 20_000; now += 16) {
+      if (now >= 100) controller.setResult(two, now);
+      if (now >= 600) controller.quickStop(now);
+      if (controller.tick(now).allLanded) break;
+    }
+    assert.ok(now > 3 * (ANTICIPATION_SPIN_MS + ANTICIPATION_SLOW_MS) - 600, `quick stop skipped anticipation (finished at ${now})`);
+    assert.deepEqual(visibleGrid(controller), gridFromStops(two));
   });
 
   it('a failed request (null result) still brings every reel to rest', () => {

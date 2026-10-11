@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { ALL_SYMBOLS, REEL_STRIPS, REELS, ROWS, type SymbolId } from './engine/index.ts';
+import { ALL_SYMBOLS, REEL_STRIPS, REELS, ROWS, SCATTER, type SymbolId } from './engine/index.ts';
 import { SpinController } from './game/spinController.ts';
 
 export const symbolSrc = (id: SymbolId) => `/reels/${id}.png`;
@@ -26,10 +26,13 @@ export function useReels() {
   const onLanded = useRef<() => void>(() => {});
 
   const draw = useCallback(() => {
+    // While a reel waits for the third coin it glows, and the coins already landed pulse.
+    const waiting = controller.anticipatingReel;
     controller.motions.forEach((motion, reel) => {
       const position = motion.position;
       const top = Math.floor(-position);
       columns.current[reel]?.classList.toggle('is-spinning', motion.isFast);
+      columns.current[reel]?.classList.toggle('is-anticipating', reel === waiting);
       slots.current[reel].forEach((slot, k) => {
         if (!slot) return;
         const index = top + k;
@@ -41,6 +44,8 @@ export function useReels() {
           img.src = symbolSrc(symbol);
           img.alt = symbol;
         }
+        slot.classList.toggle('is-teaser', waiting !== null && motion.isIdle && symbol === SCATTER);
+        slot.classList.toggle('is-hush', waiting !== null && motion.isIdle && symbol !== SCATTER);
       });
     });
   }, [controller]);

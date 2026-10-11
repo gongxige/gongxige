@@ -44,11 +44,15 @@ export class ReelMotion {
   /**
    * Begin decelerating at `now`. Returns the whole-number position the reel
    * will come to rest on; the caller puts the result symbols there.
+   * `slowMs` stretches the slow-down to about that long (the "waiting for the
+   * third scatter" stop); the default is the normal quick stop.
    */
-  stop(now: number): number {
+  stop(now: number, slowMs = 0): number {
     this.update(now);
     if (this.phase.kind !== 'spin') throw new Error('Reel is not at full speed');
-    const target = Math.ceil(this.position) + MIN_STOP_DISTANCE;
+    // A longer slow-down from the same full speed simply covers more symbols.
+    const symbols = Math.max(MIN_STOP_DISTANCE, Math.round((SPIN_SPEED * slowMs) / 2));
+    const target = Math.ceil(this.position) + symbols;
     // Ease-out quad starts at velocity 2·distance/duration; matching that to
     // SPIN_SPEED keeps the hand-over from full speed seamless.
     const distance = target + OVERSHOOT - this.position;
