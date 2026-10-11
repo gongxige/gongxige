@@ -249,16 +249,19 @@ function handleRoundLookup(raw, req, res) {
   const operatorId = String(req.headers['x-operator-id'] ?? '');
   const operator = OPERATORS[operatorId];
   if (!operator || !verify(raw, req.headers['x-signature'], operator.secret)) return json(res, 401, { code: 'BAD_SIGNATURE', error: '签名不对，拒绝处理' });
-  const { playerId, roundId } = parseJson(raw);
-  if (!playerId) return json(res, 400, { code: 'BAD_REQUEST', error: '缺少 playerId' });
-  const ownsRound = (round) => round && round.operatorId === operatorId && round.playerId === String(playerId);
+  const { playerId, roundId, scope, limit } = parseJson(raw);
+  // The operator's back office may ask for all of its own players' rounds, but only explicitly.
+  const wholeOperator = scope === 'operator';
+  if (!playerId && !wholeOperator) return json(res, 400, { code: 'BAD_REQUEST', error: '缺少 playerId' });
+  const ownsRound = (round) => round && round.operatorId === operatorId && (wholeOperator || round.playerId === String(playerId));
   if (roundId) {
     const round = rounds.get(String(roundId));
     if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
     const replayed = replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
     return json(res, 200, { round, replay: { payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, matches: replayed.payout === round.payout && round.engineVersion === ENGINE_VERSION } });
   }
-  const records = rounds.list((round) => ownsRound(round)).map((round) => ({ roundId: round.roundId, at: round.at, bet: round.bet, payout: round.payout }));
+  const records = rounds.list((round) => ownsRound(round), Math.min(Math.max(Number(limit) || 50, 1), 500))
+    .map((round) => ({ roundId: round.roundId, at: round.at, bet: round.bet, payout: round.payout, ...(wholeOperator ? { playerId: round.playerId, mode: round.mode, status: round.status } : {}) }));
   return json(res, 200, { records });
 }
 

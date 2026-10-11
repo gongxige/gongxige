@@ -95,3 +95,54 @@ export function listAuditLogs(db, { limit = 200 } = {}) {
     ORDER BY l.created_at DESC, l.rowid DESC LIMIT ?`).all(Math.min(Math.max(Number(limit) || 200, 1), 500))
     .map((row) => ({ ...row, details: row.details ? JSON.parse(row.details) : null }));
 }
+
+export function listRequests(db, type, { status = '' } = {}) {
+  const table = { deposit: 'deposit_requests', withdrawal: 'withdrawal_requests' }[type];
+  if (!table) throw new LedgerError('INVALID_REQUEST', '申请类型无效');
+  const statusFilter = ['pending', 'approved', 'rejected'].includes(status) ? status : null;
+  return db.prepare(`SELECT r.id, r.request_no AS requestNo, r.player_id AS playerId, p.username, r.amount, r.status,
+      r.reviewed_by AS reviewedBy, r.reviewed_at AS reviewedAt, r.review_note AS reviewNote, r.created_at AS createdAt
+    FROM ${table} r JOIN players p ON p.id = r.player_id
+    WHERE (? IS NULL OR r.status = ?)
+    ORDER BY r.status = 'pending' DESC, r.created_at DESC, r.rowid DESC LIMIT 500`).all(statusFilter, statusFilter);
+}
+
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** Local calendar day "YYYY-MM-DD" → ISO timestamp of its start (or of the next day's start). */
+function dayStart(day, nextDay = false) {
+  if (!DAY_PATTERN.test(String(day))) return null;
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(year, month - 1, date + (nextDay ? 1 : 0)).toISOString();
+}
+
+/** All ledger entries, newest first, filtered by player (ID or username), kind and local date range. */
+export function listTransactions(db, { player = '', kind = '', from = '', to = '', limit = 500 } = {}) {
+  const fromIso = dayStart(from);
+  const toIso = dayStart(to, true);
+  const who = String(player).trim() || null;
+  const what = String(kind).trim() || null;
+  return db.prepare(`SELECT l.transaction_id AS transactionId, l.player_id AS playerId, p.username, l.kind, l.amount,
+      l.balance_delta AS balanceDelta, l.frozen_delta AS frozenDelta, l.balance_after AS balanceAfter, l.frozen_after AS frozenAfter,
+      l.status, l.round_id AS roundId, l.reason, l.created_at AS createdAt
+    FROM ledger_entries l JOIN players p ON p.id = l.player_id
+    WHERE (? IS NULL OR l.player_id = ? OR p.username = ?)
+      AND (? IS NULL OR l.kind = ?)
+      AND (? IS NULL OR l.created_at >= ?)
+      AND (? IS NULL OR l.created_at < ?)
+    ORDER BY l.created_at DESC, l.rowid DESC LIMIT ?`)
+    .all(who, who, who, what, what, fromIso, fromIso, toIso, toIso, Math.min(Math.max(Number(limit) || 500, 1), 2000));
+}
+
+/** Per player: wallet numbers next to the numbers recomputed from the ledger, and the differences. */
+export function reconciliation(db) {
+  return db.prepare('SELECT id, username, status FROM players ORDER BY created_at, id').all().map((player) => {
+    const report = reconcilePlayer(db, player.id);
+    const entries = db.prepare('SELECT COUNT(*) AS count FROM ledger_entries WHERE player_id = ?').get(player.id).count;
+    return {
+      playerId: player.id, username: player.username, status: player.status, entries,
+      balance: report.actual.balance, ledgerBalance: report.ledger.balance, balanceDiff: report.actual.balance - report.ledger.balance,
+      frozen: report.actual.frozen_balance, ledgerFrozen: report.ledger.frozenBalance, frozenDiff: report.actual.frozen_balance - report.ledger.frozenBalance,
+      ok: report.balanceMatches && report.frozenMatches,
+    };
+  });
+}

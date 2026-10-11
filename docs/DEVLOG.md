@@ -1,5 +1,23 @@
 # 开发日志
 
+## 2026-10-11 · STEP-10 后台：审核、流水、游戏记录、对账、故障模拟（Claude Code 人工开发模式）
+
+**做了什么**
+
+- `server/platform/ledger.mjs`：充值/提现的通过和拒绝合并到一个 `settleRequest`（在事务里执行）：`UPDATE … WHERE id = ? AND status = 'pending'`，改到 0 行就报 `REQUEST_NOT_PENDING`，所以同一申请不可能被处理两次（并发也一样）；充值通过加可用余额，拒绝不动钱；提现通过从冻结中扣除，拒绝把冻结退回可用（新流水类型 `withdrawal_rejected`）。新增 `reviewRequest`（按申请 ID 审核，审核与操作日志同一事务）。原有 `approveDeposit`/`approveWithdrawal` 保留，改为调用同一逻辑。
+- `server/platform/admin.mjs`：`listRequests`（按状态筛选，待审核排前）、`listTransactions`（按玩家编号或用户名、类型、本机日期范围筛选，最多 500 条）、`reconciliation`（每位玩家：钱包余额/冻结 vs 流水计算值、差额、流水条数）。
+- `server.mjs`：`POST /provider/rounds` 支持 `scope: "operator"`，让平台后台查自己所有玩家的局（仍需签名、仍只限本平台）；不带 `scope` 时仍必须给 `playerId`，玩家接口不受影响。
+- `platform-server.mjs`：新增 `/api/admin/deposit-requests`、`/withdrawal-requests`（列表、`/:id/approve`、`/:id/reject`）、`/transactions`、`/rounds`、`/rounds/:id/replay`、`/reconciliation`、`/faults`（GET/POST）；故障设置（含旧 `/admin/fault`）写操作日志；`REQUEST_NOT_PENDING` → 409、`REQUEST_NOT_FOUND` → 404。
+- `src/admin/AdminApp.tsx`：新增充值审核、提现审核、交易流水、游戏记录、对账（表格，不一致整行标红）、故障模拟六个标签页；操作日志显示审核对象玩家。`src/styles.css` 增加对应样式。
+- `docs/PROVIDER_API.md`：说明 `scope: "operator"`。
+- 测试 `src/platform/admin-review.test.ts`（8 个）：12 个新接口未登录/玩家 cookie 都 401；充值通过/拒绝、重复处理 409、不存在 404、操作日志；**10 个并发审核同一充值（通过和拒绝混发）只有 1 个成功、只加一次积分**；提现拒绝退回冻结、10 个并发通过同一提现只扣一次；流水按玩家/类型/日期筛选；后台能看到所有玩家的局且回放"完全一致"；**对账页每位玩家的流水计算值与 `/transactions` 逐条相加相等**，直接改库制造差额后显示 `ok: false` 和差额 123；故障模拟设置与日志。
+
+**怎么验证的**：`npm run build` 通过；`npm test` 61/61 通过；`npm run check:provider` 全部通过。浏览器实测（独立端口 + `data/admin-check` 临时数据）：新玩家提交充值 800、提现 1,500 并转 3 局 → 后台通过充值、拒绝提现 → 对账页 ui-tester 余额 10,600 与流水计算一致（10,000 − 1,500 冻结 − 240 下注 + 40 派彩 + 800 + 1,500 退回）→ 游戏记录列出 3 局，回放经 Vite 代理打开显示"完全一致" → 故障模拟设置/恢复 → 操作日志依次记录。修正了故障标题里重复的次数文字。
+
+**遗留问题**：无（STEP-11 做端到端检查脚本、`npm start` 打印网址和 README）。
+
+---
+
 ## 2026-10-11 · STEP-09 后台：管理员、概览、玩家管理、操作日志（Claude Code 人工开发模式）
 
 **做了什么**

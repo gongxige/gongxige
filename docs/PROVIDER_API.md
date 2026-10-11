@@ -44,6 +44,7 @@
 
 - 查列表：`{ "playerId": "player-001" }` → `{ "records": [{ roundId, at, bet, payout }] }`
 - 查单局：`{ "playerId": "player-001", "roundId": "…" }` → `{ "round": {…}, "replay": { payout, freeSpinsAwarded, matches } }`，`matches` 表示用停点重新计算的结果是否和记录一致。
+- 平台后台查全部：把 `playerId` 换成 `"scope": "operator"`，就能查这个平台所有玩家的局（列表最多 `limit` 条，上限 500，每条多带 `playerId`、`mode`、`status`）；仍然只能看到签名平台自己的局。不带 `scope` 时必须给 `playerId`。
 
 回放页面由平台用返回的 `round` 渲染（`server/replay-page.mjs`）：玩家网站是 `/api/game-records/{局号}/replay`（只能看自己的），模拟平台后台是 `/admin/replay?player=…&round=…`。
 （STEP-08 起，原来不需要权限的 `GET /api/rounds/{局号}`、`GET /api/replay/{局号}` 已删除，避免玩家按局号看到别人的记录。）

@@ -91,18 +91,42 @@ export function createDepositRequest(db, { playerId, requestNo, amount }) {
   });
 }
 
+const REQUEST_TABLES = { deposit: 'deposit_requests', withdrawal: 'withdrawal_requests' };
+const REQUEST_NAMES = { deposit: '充值申请', withdrawal: '提现申请' };
+
+/**
+ * Approves or rejects one pending request; call inside a transaction. The
+ * status change only succeeds while the request is still pending, so the same
+ * request can never be settled twice, even when two reviews race.
+ *   deposit approved     → +balance
+ *   deposit rejected     → no money moves
+ *   withdrawal approved  → −frozen (the credits leave the platform)
+ *   withdrawal rejected  → frozen back to available
+ */
+function settleRequest(db, type, request, approve, reviewedBy, note = null) {
+  const changed = db.prepare(`UPDATE ${REQUEST_TABLES[type]} SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND status = 'pending'`)
+    .run(approve ? 'approved' : 'rejected', reviewedBy, now(), note, request.id);
+  if (changed.changes !== 1) throw new LedgerError('REQUEST_NOT_PENDING', `${REQUEST_NAMES[type]}已处理`);
+  const move = type === 'deposit'
+    ? (approve ? { kind: 'deposit_approved', balanceDelta: request.amount, frozenDelta: 0 } : null)
+    : approve ? { kind: 'withdrawal_approved', balanceDelta: 0, frozenDelta: -request.amount }
+      : { kind: 'withdrawal_rejected', balanceDelta: request.amount, frozenDelta: -request.amount };
+  if (move) {
+    changeWallet(db, request.player_id, move.balanceDelta, move.frozenDelta);
+    addLedgerEntry(db, { playerId: request.player_id, transactionId: `${move.kind.replace('_', '-')}:${request.id}`,
+      kind: move.kind, amount: request.amount, balanceDelta: move.balanceDelta, frozenDelta: move.frozenDelta, requestId: request.id, reason: note });
+  }
+  return getWallet(db, request.player_id);
+}
+
+function pendingRequestByNo(db, type, requestNo) {
+  const request = db.prepare(`SELECT * FROM ${REQUEST_TABLES[type]} WHERE request_no = ?`).get(requestNo);
+  if (!request || request.status !== 'pending') throw new LedgerError('REQUEST_NOT_PENDING', `${REQUEST_NAMES[type]}不可审核`);
+  return request;
+}
+
 export function approveDeposit(db, { requestNo, reviewedBy = 'system' }) {
-  return inTransaction(db, () => {
-    const request = db.prepare('SELECT * FROM deposit_requests WHERE request_no = ?').get(requestNo);
-    if (!request || request.status !== 'pending') throw new LedgerError('REQUEST_NOT_PENDING', '充值申请不可审核');
-    const changed = db.prepare("UPDATE deposit_requests SET status = 'approved', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'")
-      .run(reviewedBy, now(), request.id);
-    if (changed.changes !== 1) throw new LedgerError('REQUEST_NOT_PENDING', '充值申请已处理');
-    changeWallet(db, request.player_id, request.amount, 0);
-    addLedgerEntry(db, { playerId: request.player_id, transactionId: `deposit-approved:${request.id}`,
-      kind: 'deposit_approved', amount: request.amount, balanceDelta: request.amount, frozenDelta: 0, requestId: request.id });
-    return getWallet(db, request.player_id);
-  });
+  return inTransaction(db, () => settleRequest(db, 'deposit', pendingRequestByNo(db, 'deposit', requestNo), true, reviewedBy));
 }
 
 export function createWithdrawalRequest(db, { playerId, requestNo, amount }) {
@@ -122,16 +146,20 @@ export function createWithdrawalRequest(db, { playerId, requestNo, amount }) {
 }
 
 export function approveWithdrawal(db, { requestNo, reviewedBy = 'system' }) {
+  return inTransaction(db, () => settleRequest(db, 'withdrawal', pendingRequestByNo(db, 'withdrawal', requestNo), true, reviewedBy));
+}
+
+/** Back-office review by request ID, with the audit log in the same transaction. */
+export function reviewRequest(db, { type, requestId, approve, adminId, adminName, note = '' }) {
+  if (!REQUEST_TABLES[type]) throw new LedgerError('INVALID_REQUEST', '申请类型无效');
+  const text = typeof note === 'string' && note.trim() ? note.trim().slice(0, 200) : null;
   return inTransaction(db, () => {
-    const request = db.prepare('SELECT * FROM withdrawal_requests WHERE request_no = ?').get(requestNo);
-    if (!request || request.status !== 'pending') throw new LedgerError('REQUEST_NOT_PENDING', '提现申请不可审核');
-    const changed = db.prepare("UPDATE withdrawal_requests SET status = 'approved', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'")
-      .run(reviewedBy, now(), request.id);
-    if (changed.changes !== 1) throw new LedgerError('REQUEST_NOT_PENDING', '提现申请已处理');
-    changeWallet(db, request.player_id, 0, -request.amount);
-    addLedgerEntry(db, { playerId: request.player_id, transactionId: `withdrawal-approved:${request.id}`,
-      kind: 'withdrawal_approved', amount: request.amount, balanceDelta: 0, frozenDelta: -request.amount, requestId: request.id });
-    return getWallet(db, request.player_id);
+    const request = db.prepare(`SELECT * FROM ${REQUEST_TABLES[type]} WHERE id = ?`).get(requestId);
+    if (!request) throw new LedgerError('REQUEST_NOT_FOUND', `没有这个${REQUEST_NAMES[type]}`);
+    const wallet = settleRequest(db, type, request, approve, adminName ?? adminId, text);
+    writeAuditLog(db, { adminId, action: `${approve ? 'approve' : 'reject'}_${type}`, targetType: `${type}_request`, targetId: request.id, reason: text,
+      details: { playerId: request.player_id, amount: request.amount, requestNo: request.request_no } });
+    return { id: request.id, status: approve ? 'approved' : 'rejected', playerId: request.player_id, ...wallet };
   });
 }
 

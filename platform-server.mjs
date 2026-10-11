@@ -5,10 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { json, html, parseJson, readRaw, signedPost, verify } from './server/http.mjs';
 import { openPlatformDatabase } from './server/platform/db.mjs';
-import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, manualAdjustment, placeBet, reconcilePlayer, refundBet, setPlayerStatus } from './server/platform/ledger.mjs';
+import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, manualAdjustment, placeBet, reconcilePlayer, refundBet, reviewRequest, setPlayerStatus, writeAuditLog } from './server/platform/ledger.mjs';
 import { authenticatePlayer, changePassword, createSessionStore, registerPlayer } from './server/platform/auth.mjs';
 import { replayPage } from './server/replay-page.mjs';
-import { authenticateAdmin, ensureInitialAdmin, getAdmin, listAuditLogs, listPlayers, overview, playerDetail, recordAdminLogout } from './server/platform/admin.mjs';
+import { authenticateAdmin, ensureInitialAdmin, getAdmin, listAuditLogs, listPlayers, listRequests, listTransactions, overview, playerDetail, reconciliation, recordAdminLogout } from './server/platform/admin.mjs';
+import { inTransaction } from './server/platform/db.mjs';
 
 export const PLATFORM_PROTOCOL = 'provider-v1';
 const port = Number(process.env.OPERATOR_PORT ?? 8788);
@@ -133,6 +134,19 @@ async function createLaunch(playerId) {
 async function providerRounds(playerId, roundId) {
   return signedPost(`${providerUrl}/provider/rounds`, { playerId, ...(roundId ? { roundId } : {}) }, { secret, operatorId });
 }
+/** Back office: any round of this operator's players. */
+async function operatorRounds(roundId) {
+  return signedPost(`${providerUrl}/provider/rounds`, { scope: 'operator', ...(roundId ? { roundId } : { limit: 500 }) }, { secret, operatorId });
+}
+
+const FAULT_KINDS = { none: '无故障', 'win-down': '派彩连续失败', 'slow-bet': '下一次扣款超时' };
+function setFault(kind, adminId) {
+  if (!FAULT_KINDS[kind]) throw new LedgerError('INVALID_FAULT', '没有这种故障');
+  fault = kind === 'win-down' ? { kind, remaining: 4 } : kind === 'slow-bet' ? { kind, remaining: 1 } : { kind: 'none', remaining: 0 };
+  inTransaction(db, () => writeAuditLog(db, { adminId, action: 'set_fault', targetType: 'fault', targetId: kind, details: { label: FAULT_KINDS[kind] } }));
+  return faultState();
+}
+const faultState = () => ({ kind: fault.kind, remaining: fault.remaining, label: FAULT_KINDS[fault.kind], kinds: FAULT_KINDS });
 
 /** /api/admin/*: every route except login needs an admin session. */
 async function adminApi(req, res, url) {
@@ -154,6 +168,32 @@ async function adminApi(req, res, url) {
   if (req.method === 'GET' && path === '/overview') return json(res, 200, overview(db));
   if (req.method === 'GET' && path === '/players') return json(res, 200, { players: listPlayers(db, { query: url.searchParams.get('q') ?? '' }) });
   if (req.method === 'GET' && path === '/audit-logs') return json(res, 200, { logs: listAuditLogs(db, { limit: url.searchParams.get('limit') }) });
+  const requestList = path.match(/^\/(deposit|withdrawal)-requests$/);
+  if (req.method === 'GET' && requestList) return json(res, 200, { requests: listRequests(db, requestList[1], { status: url.searchParams.get('status') ?? '' }) });
+  const requestReview = path.match(/^\/(deposit|withdrawal)-requests\/([^/]+)\/(approve|reject)$/);
+  if (req.method === 'POST' && requestReview) {
+    const { note } = parseJson(await readRaw(req));
+    return json(res, 200, reviewRequest(db, { type: requestReview[1], requestId: decodeURIComponent(requestReview[2]), approve: requestReview[3] === 'approve', adminId: admin.id, adminName: admin.username, note }));
+  }
+  if (req.method === 'GET' && path === '/transactions') {
+    const q = url.searchParams;
+    return json(res, 200, { transactions: listTransactions(db, { player: q.get('player') ?? '', kind: q.get('kind') ?? '', from: q.get('from') ?? '', to: q.get('to') ?? '' }) });
+  }
+  if (req.method === 'GET' && path === '/rounds') {
+    const { status, body } = await operatorRounds();
+    if (status !== 200) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取游戏记录');
+    const names = new Map(db.prepare('SELECT id, username FROM players').all().map((p) => [p.id, p.username]));
+    return json(res, 200, { rounds: body.records.map((round) => ({ ...round, username: names.get(round.playerId) ?? null })) });
+  }
+  const roundReplay = path.match(/^\/rounds\/([\w-]+)\/replay$/);
+  if (req.method === 'GET' && roundReplay) {
+    const { status, body } = await operatorRounds(roundReplay[1]);
+    if (status !== 200 && status !== 404) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取回放');
+    return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl));
+  }
+  if (req.method === 'GET' && path === '/reconciliation') return json(res, 200, { players: reconciliation(db) });
+  if (req.method === 'GET' && path === '/faults') return json(res, 200, faultState());
+  if (req.method === 'POST' && path === '/faults') return json(res, 200, setFault(String(parseJson(await readRaw(req)).kind ?? ''), admin.id));
   const playerMatch = path.match(/^\/players\/([^/]+)(?:\/(freeze|unfreeze|adjustment))?$/);
   if (playerMatch) {
     const playerId = decodeURIComponent(playerMatch[1]);
@@ -266,7 +306,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, state());
     if (req.method === 'POST' && url.pathname === '/admin/fault') {
       const form = new URLSearchParams(await readRaw(req)); const kind = form.get('kind');
-      fault = kind === 'win-down' ? { kind, remaining: 4 } : kind === 'slow-bet' ? { kind, remaining: 1 } : { kind: 'none', remaining: 0 };
+      setFault(FAULT_KINDS[kind] ? kind : 'none', currentAdmin(req).id);
       return json(res, 200, { ok: true });
     }
     if (req.method === 'POST' && url.pathname.startsWith('/wallet/')) {
@@ -279,7 +319,7 @@ const server = createServer(async (req, res) => {
     json(res, 404, { error: 'Not found' });
   } catch (error) {
     if (error instanceof LedgerError) {
-      const status = error.code === 'USERNAME_TAKEN' ? 409 : error.code === 'PLAYER_FROZEN' ? 403 : error.code === 'LOGIN_RATE_LIMITED' ? 429 : error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'PLAYER_NOT_FOUND' ? 404 : 400;
+      const status = error.code === 'USERNAME_TAKEN' ? 409 : error.code === 'PLAYER_FROZEN' ? 403 : error.code === 'LOGIN_RATE_LIMITED' ? 429 : error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'PLAYER_NOT_FOUND' || error.code === 'REQUEST_NOT_FOUND' ? 404 : error.code === 'REQUEST_NOT_PENDING' ? 409 : 400;
       return fail(res, status, error.code, error.message);
     }
     json(res, 400, { code: 'BAD_REQUEST', error: error instanceof Error ? error.message : 'Bad request' });

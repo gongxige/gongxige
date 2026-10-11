@@ -1,14 +1,21 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 
 // Back office at /admin: admin login, overview, players (search, detail,
-// freeze/unfreeze, manual adjustment with a reason) and the audit log.
+// freeze/unfreeze, manual adjustment with a reason), deposit and withdrawal
+// review, all transactions, all game rounds, reconciliation, fault simulation
+// and the audit log.
 type Admin = { id: string; username: string };
 type Overview = { players: number; frozenPlayers: number; depositsApproved: number; withdrawalsApproved: number; bets: number; wins: number; platformProfit: number };
 type PlayerRow = { id: string; username: string; status: string; createdAt: string; balance: number; frozenBalance: number };
 type LedgerRow = { transactionId: string; kind: string; amount: number; balanceDelta: number; balanceAfter: number; status: string; roundId: string | null; reason: string | null; createdAt: string };
 type PlayerDetail = { player: { id: string; username: string; status: string; createdAt: string }; wallet: { balance: number; frozen_balance: number }; reconciled: boolean; ledger: LedgerRow[] };
 type AuditLog = { id: string; admin: string; action: string; targetType: string | null; targetId: string | null; reason: string | null; details: Record<string, unknown> | null; createdAt: string };
-type Tab = 'overview' | 'players' | 'logs';
+type ReviewRow = { id: string; requestNo: string; playerId: string; username: string; amount: number; status: string; reviewedBy: string | null; reviewedAt: string | null; reviewNote: string | null; createdAt: string };
+type TransactionRow = LedgerRow & { playerId: string; username: string; frozenDelta: number };
+type RoundRow = { roundId: string; at: string; bet: number; payout: number; playerId: string; username: string | null; mode: string; status: string };
+type ReconRow = { playerId: string; username: string; status: string; entries: number; balance: number; ledgerBalance: number; balanceDiff: number; frozen: number; ledgerFrozen: number; frozenDiff: number; ok: boolean };
+type FaultState = { kind: string; remaining: number; label: string; kinds: Record<string, string> };
+type Tab = 'overview' | 'players' | 'deposits' | 'withdrawals' | 'transactions' | 'rounds' | 'reconciliation' | 'faults' | 'logs';
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
@@ -19,8 +26,10 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 const fmt = (n: number) => n.toLocaleString('zh-CN');
 const time = (iso: string) => new Date(iso).toLocaleString('zh-CN');
-const kindLabel: Record<string, string> = { registration_credit: '注册赠送', deposit_approved: '充值到账', withdrawal_freeze: '提现冻结', withdrawal_approved: '提现完成', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
-const actionLabel: Record<string, string> = { login: '登录后台', logout: '退出后台', freeze_player: '冻结玩家', unfreeze_player: '解冻玩家', adjust_balance: '调整余额' };
+const kindLabel: Record<string, string> = { registration_credit: '注册赠送', deposit_approved: '充值到账', withdrawal_freeze: '提现冻结', withdrawal_approved: '提现完成', withdrawal_rejected: '提现被拒（解冻）', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
+const actionLabel: Record<string, string> = { login: '登录后台', logout: '退出后台', freeze_player: '冻结玩家', unfreeze_player: '解冻玩家', adjust_balance: '调整余额', approve_deposit: '通过充值', reject_deposit: '拒绝充值', approve_withdrawal: '通过提现', reject_withdrawal: '拒绝提现', set_fault: '故障模拟' };
+const requestStatusLabel: Record<string, string> = { pending: '待审核', approved: '已通过', rejected: '已拒绝' };
+const signed = (n: number) => `${n > 0 ? '+' : ''}${fmt(n)}`;
 
 function Notice() { return <div className="demo-notice">演示平台 · 仅虚拟积分 · 不涉及真实货币</div>; }
 
@@ -90,10 +99,81 @@ function PlayersPanel() {
     <div className="records-list">{players.length ? players.map((p) => <button key={p.id} className="record admin-player-row" onClick={() => setSelected(p.id)}><b>{p.username}</b><span>余额 {fmt(p.balance)}{p.frozenBalance ? ` · 冻结 ${fmt(p.frozenBalance)}` : ''}</span><em className={p.status === 'active' ? undefined : 'negative'}>{p.status === 'active' ? '正常' : '已冻结'}</em><small>{p.id} · 注册于 {time(p.createdAt)}</small></button>) : <p>没有找到玩家。</p>}</div></section>;
 }
 
+function ReviewPanel({ type }: { type: 'deposit' | 'withdrawal' }) {
+  const name = type === 'deposit' ? '充值' : '提现';
+  const [rows, setRows] = useState<ReviewRow[]>([]); const [status, setStatus] = useState('pending'); const [message, setMessage] = useState(''); const [busy, setBusy] = useState('');
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const load = useCallback(() => adminFetch<{ requests: ReviewRow[] }>(`/${type}-requests?status=${status}`).then(({ requests }) => setRows(requests)).catch((error: Error) => setMessage(error.message)), [type, status]);
+  useEffect(() => { load(); }, [load]);
+  async function review(row: ReviewRow, decision: 'approve' | 'reject') {
+    setBusy(row.id); setMessage('');
+    try { await adminFetch(`/${type}-requests/${encodeURIComponent(row.id)}/${decision}`, { method: 'POST', body: JSON.stringify({ note: notes[row.id] ?? '' }) }); setMessage(`已${decision === 'approve' ? '通过' : '拒绝'} ${row.username} 的${name}申请 ${fmt(row.amount)}。`); }
+    catch (error) { setMessage(error instanceof Error ? error.message : '操作失败。'); }
+    finally { setBusy(''); await load(); }
+  }
+  return <section><div className="admin-filters"><label>状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="">全部</option></select></label></div>
+    <p className="admin-hint">{type === 'deposit' ? '通过后积分立即到账；拒绝不改变余额。' : '提交时金额已冻结；通过后从冻结中扣除，拒绝则退回可用余额。'}同一申请只能处理一次。</p>
+    {message && <p className="form-message" role="status">{message}</p>}
+    <div className="records-list">{rows.length ? rows.map((row) => <article className="record admin-review" key={row.id}><b>{row.username}</b><span>{fmt(row.amount)} DEMO</span><em className={row.status === 'rejected' ? 'negative' : undefined}>{requestStatusLabel[row.status] ?? row.status}</em>
+      <small>申请于 {time(row.createdAt)} · {row.requestNo}{row.reviewedAt ? ` · ${row.reviewedBy} 于 ${time(row.reviewedAt)} 处理` : ''}{row.reviewNote ? ` · 备注：${row.reviewNote}` : ''}</small>
+      {row.status === 'pending' && <div className="admin-review-actions"><input placeholder="备注（可选）" maxLength={200} value={notes[row.id] ?? ''} onChange={(event) => setNotes({ ...notes, [row.id]: event.target.value })} disabled={busy === row.id} /><button className="primary-button" disabled={busy === row.id} onClick={() => review(row, 'approve')}>通过</button><button className="secondary-button" disabled={busy === row.id} onClick={() => review(row, 'reject')}>拒绝</button></div>}
+    </article>) : <p>没有{status ? requestStatusLabel[status] : ''}的{name}申请。</p>}</div></section>;
+}
+
+type TransactionFilters = { player: string; kind: string; from: string; to: string };
+function TransactionsPanel() {
+  const [filters, setFilters] = useState<TransactionFilters>({ player: '', kind: '', from: '', to: '' }); const [rows, setRows] = useState<TransactionRow[]>([]); const [message, setMessage] = useState('');
+  const load = useCallback((next: TransactionFilters) => adminFetch<{ transactions: TransactionRow[] }>(`/transactions?${new URLSearchParams(next)}`).then(({ transactions }) => { setRows(transactions); setMessage(''); }).catch((error: Error) => setMessage(error.message)), []);
+  // First load with empty filters; later loads come from the form.
+  useEffect(() => { load({ player: '', kind: '', from: '', to: '' }); }, [load]);
+  const set = (key: keyof TransactionFilters) => (event: { target: { value: string } }) => setFilters({ ...filters, [key]: event.target.value });
+  return <section><form className="admin-filters" onSubmit={(event) => { event.preventDefault(); load(filters); }}>
+    <label>玩家（用户名或编号）<input value={filters.player} onChange={set('player')} /></label>
+    <label>类型<select value={filters.kind} onChange={set('kind')}><option value="">全部</option>{Object.entries(kindLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <label>从<input type="date" value={filters.from} onChange={set('from')} /></label><label>到<input type="date" value={filters.to} onChange={set('to')} /></label>
+    <button className="primary-button">筛选</button></form>
+    {message && <p className="form-message" role="status">{message}</p>}
+    <p className="admin-hint">共 {rows.length} 条（最多显示 500 条）。</p>
+    <div className="records-list">{rows.length ? rows.map((row) => <article className="record" key={row.transactionId}><b>{kindLabel[row.kind] ?? row.kind} · {row.username}</b><span>可用 {signed(row.balanceDelta)}{row.frozenDelta ? ` · 冻结 ${signed(row.frozenDelta)}` : ''} → 余额 {fmt(row.balanceAfter)}</span><em>{row.status === 'refunded' ? '已回滚' : '完成'}</em><small>{time(row.createdAt)}{row.reason ? ` · 原因：${row.reason}` : ''}{row.roundId ? ` · 局号 ${row.roundId}` : ''}</small></article>) : <p>没有符合条件的流水。</p>}</div></section>;
+}
+
+function RoundsPanel() {
+  const [rows, setRows] = useState<RoundRow[]>([]); const [message, setMessage] = useState('');
+  useEffect(() => { adminFetch<{ rounds: RoundRow[] }>('/rounds').then(({ rounds }) => setRows(rounds)).catch((error: Error) => setMessage(error.message)); }, []);
+  return <section>{message && <p className="form-message" role="status">{message}</p>}<p className="admin-hint">所有玩家最近 500 局；点局号在新页面打开回放（含"重新计算是否一致"）。</p>
+    <div className="records-list">{rows.length ? rows.map((row) => <article className="record game-record" key={row.roundId}><b>{row.username ?? row.playerId} · {time(row.at)}</b><span>{row.mode === 'free' ? '免费局' : `投注 ${fmt(row.bet)}`} · 赢分 {fmt(row.payout)}</span><em className={row.status === 'settled' ? undefined : 'negative'}>{row.status === 'settled' ? '已结算' : '派彩待发'}</em><a href={`/api/admin/rounds/${encodeURIComponent(row.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{row.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section>;
+}
+
+function ReconciliationPanel() {
+  const [rows, setRows] = useState<ReconRow[]>([]); const [message, setMessage] = useState('');
+  useEffect(() => { adminFetch<{ players: ReconRow[] }>('/reconciliation').then(({ players }) => setRows(players)).catch((error: Error) => setMessage(error.message)); }, []);
+  const bad = rows.filter((row) => !row.ok).length;
+  return <section>{message && <p className="form-message" role="status">{message}</p>}
+    <p className={`admin-hint${bad ? ' negative' : ''}`}>{rows.length} 位玩家，{bad ? `${bad} 位不一致（标红）` : '全部一致'}。"流水计算" = 该玩家全部资金流水的变动之和，应与钱包里的数字相同。</p>
+    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>玩家</th><th>可用余额</th><th>流水计算</th><th>差额</th><th>冻结</th><th>流水计算</th><th>差额</th><th>流水条数</th><th>结果</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.playerId} className={row.ok ? undefined : 'mismatch'}><td>{row.username}</td><td>{fmt(row.balance)}</td><td>{fmt(row.ledgerBalance)}</td><td>{signed(row.balanceDiff)}</td><td>{fmt(row.frozen)}</td><td>{fmt(row.ledgerFrozen)}</td><td>{signed(row.frozenDiff)}</td><td>{fmt(row.entries)}</td><td>{row.ok ? '✓ 一致' : '✗ 不一致'}</td></tr>)}</tbody></table></div></section>;
+}
+
+function FaultsPanel() {
+  const [state, setState] = useState<FaultState | null>(null); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
+  useEffect(() => { adminFetch<FaultState>('/faults').then(setState).catch((error: Error) => setMessage(error.message)); }, []);
+  async function choose(kind: string) {
+    setBusy(true); setMessage('');
+    try { const next = await adminFetch<FaultState>('/faults', { method: 'POST', body: JSON.stringify({ kind }) }); setState(next); setMessage(`已设置：${next.label}`); }
+    catch (error) { setMessage(error instanceof Error ? error.message : '操作失败。'); }
+    finally { setBusy(false); }
+  }
+  if (!state) return <p className="form-message">{message || '加载中…'}</p>;
+  return <section><div className="admin-cards"><article className="admin-card"><span>当前故障</span><strong className={state.kind === 'none' ? undefined : 'negative'}>{state.label}{state.kind === 'win-down' ? `（还剩 ${state.remaining} 次）` : ''}</strong></article></div>
+    <p className="admin-hint">派彩连续失败：接下来 4 次派彩都会失败，游戏服务器会把派彩放进待发队列，稍后自动补发；扣款超时：这一局会被取消并自动回滚。之后可在"对账"页确认数字仍然一致。</p>
+    {message && <p className="form-message" role="status">{message}</p>}
+    <div className="admin-review-actions">{Object.entries(state.kinds).map(([kind, label]) => <button key={kind} className={kind === 'none' ? 'secondary-button' : 'primary-button'} disabled={busy} onClick={() => choose(kind)}>{label}</button>)}</div></section>;
+}
+
 function AuditLogPanel() {
   const [logs, setLogs] = useState<AuditLog[]>([]); const [message, setMessage] = useState('');
   useEffect(() => { adminFetch<{ logs: AuditLog[] }>('/audit-logs').then(({ logs: rows }) => setLogs(rows)).catch((error: Error) => setMessage(error.message)); }, []);
-  return <section>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{logs.length ? logs.map((log) => <article className="record" key={log.id}><b>{actionLabel[log.action] ?? log.action}</b><span>{log.admin}{log.targetType === 'player' ? ` → 玩家 ${log.targetId}` : ''}</span><em>{typeof log.details?.amount === 'number' ? `${log.details.amount > 0 ? '+' : ''}${fmt(log.details.amount)}` : ''}</em><small>{time(log.createdAt)}{log.reason ? ` · 原因：${log.reason}` : ''}</small></article>) : <p>暂无操作日志。</p>}</div></section>;
+  return <section>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{logs.length ? logs.map((log) => <article className="record" key={log.id}><b>{actionLabel[log.action] ?? log.action}</b><span>{log.admin}{log.targetType === 'player' ? ` → 玩家 ${log.targetId}` : typeof log.details?.playerId === 'string' ? ` → 玩家 ${log.details.playerId}` : ''}</span><em>{typeof log.details?.amount === 'number' ? (log.action === 'adjust_balance' ? signed(log.details.amount) : fmt(log.details.amount)) : typeof log.details?.label === 'string' ? log.details.label : ''}</em><small>{time(log.createdAt)}{log.reason ? ` · 原因：${log.reason}` : ''}</small></article>) : <p>暂无操作日志。</p>}</div></section>;
 }
 
 export default function AdminApp() {
@@ -102,9 +182,10 @@ export default function AdminApp() {
   if (!checked) return <main className="platform-page"><Notice /></main>;
   if (!admin) return <AdminLogin onSuccess={setAdmin} />;
   async function logout() { await adminFetch('/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined); setAdmin(null); }
-  const tabs: [Tab, string][] = [['overview', '概览'], ['players', '玩家管理'], ['logs', '操作日志']];
+  const tabs: [Tab, string][] = [['overview', '概览'], ['players', '玩家管理'], ['deposits', '充值审核'], ['withdrawals', '提现审核'], ['transactions', '交易流水'], ['rounds', '游戏记录'], ['reconciliation', '对账'], ['faults', '故障模拟'], ['logs', '操作日志']];
   return <main className="platform-page admin-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">BACK OFFICE</p><h1>管理后台</h1></div><div className="header-actions"><span>管理员 {admin.username}</span><button className="text-button" onClick={logout}>退出登录</button></div></header>
     <nav className="admin-tabs" aria-label="后台导航">{tabs.map(([id, label]) => <button key={id} className={tab === id ? 'active' : undefined} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>{label}</button>)}</nav>
-    {tab === 'overview' && <OverviewPanel />}{tab === 'players' && <PlayersPanel />}{tab === 'logs' && <AuditLogPanel />}
+    {tab === 'overview' && <OverviewPanel />}{tab === 'players' && <PlayersPanel />}{tab === 'deposits' && <ReviewPanel key="deposit" type="deposit" />}{tab === 'withdrawals' && <ReviewPanel key="withdrawal" type="withdrawal" />}
+    {tab === 'transactions' && <TransactionsPanel />}{tab === 'rounds' && <RoundsPanel />}{tab === 'reconciliation' && <ReconciliationPanel />}{tab === 'faults' && <FaultsPanel />}{tab === 'logs' && <AuditLogPanel />}
   </main>;
 }
