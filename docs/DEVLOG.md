@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-10-11 · 自动接力：修好 Codex 运行环境，环境错误不再空耗重试
+
+**问题**：STEP-01 连续 4 次被打回，原因不是代码，而是 Codex 在 Windows 上一条命令都执行不了（`Failed to create unified exec process: helper_unknown_error: setup refresh had errors`）。
+
+**做了什么**
+
+- 本机 `%USERPROFILE%\.codex\config.toml`（不在仓库里）：`[windows] sandbox` 从 `"elevated"` 改为 `"unelevated"`，原文件备份为 `config.toml.bak`。
+- `scripts/autopilot.mjs`：Codex 跑完后检查它的全部输出（stdout + stderr），出现 `helper_unknown_error` 或 `Failed to create unified exec process` 就立刻停下，写 `BLOCKED.md` 说明是环境问题，不提交、不审计、不计入尝试次数（退出码 3）。Codex 会回显提示词，而提示词里可能引用旧审计报告中的同样字样，所以只有比提示词里多出来的次数才算。
+- 删除 `docs/workflow/BLOCKED.md`，下次运行 STEP-01 会再给 4 次机会。
+
+**怎么验证的**
+
+- `codex exec --sandbox read-only` 在本项目目录执行 `git status` 成功，没有 helper_unknown_error（中文路径没有问题）。
+- 拿真实日志测检测逻辑：STEP-01 第 4 次的日志判定为环境错误；今天成功的测试日志、只回显旧报告的情况都不会误判。
+- `npm run build`、`npm test`（33 个全部通过）。
+
+**遗留问题**
+
+- 脚本在 Windows 上仍用 `--sandbox danger-full-access`，这次只验证了 read-only 沙箱；第一次跑 autopilot 时留意 Codex 日志。
+- `codex-windows-sandbox-service`（管理员权限的服务）还在运行，unelevated 模式用不到它，没有处理。
+
+---
+
 ## 2026-10-11 · 阶段 7 准备：Codex 写、Claude Code 审计的自动接力
 
 **用户需求**：做一个模拟博彩平台（注册、登录、充值、提现、后台管理）接入游戏；由 Codex 按计划一步一步写，写完自动交给 Claude Code 审计，通过进入下一步、不通过打回重做，全程不需要用户转发；每一步都记录在 Git 里，可以回退。

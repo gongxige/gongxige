@@ -6,6 +6,7 @@
 //   3. 让 Claude Code 审计（只读），报告存到 docs/audits/，也提交
 //   4. 通过 → 打标签 STEP-xx-passed，进入下一步；不通过 → 带着报告打回给 Codex 重做
 //   5. 同一步连续不通过 AUTOPILOT_MAX_ATTEMPTS 次（默认 4）→ 停下，写 docs/workflow/BLOCKED.md
+//   6. Codex 日志出现 helper_unknown_error 等环境错误 → 立刻停下写 BLOCKED.md，不提交、不审计、不计次数
 //
 // 随时可以按 Ctrl+C 停止；再运行 npm run autopilot 会从记录的位置接着做。
 // 想在当前这一步做完后停下：新建一个空文件 .autopilot/STOP。
@@ -109,11 +110,12 @@ function run(command, args, input, logPath, timeoutMs) {
     const log = createWriteStream(logPath);
     const child = spawn(`${quote(command)} ${args}`, { shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
+    let output = '';
     const timer = setTimeout(() => { log.write('\n[autopilot] 超时，已停止\n'); child.kill(); }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d; log.write(d); });
-    child.stderr.on('data', (d) => log.write(d));
+    child.stdout.on('data', (d) => { stdout += d; output += d; log.write(d); });
+    child.stderr.on('data', (d) => { output += d; log.write(d); });
     child.on('error', (error) => { log.write(`\n[autopilot] 启动失败：${error.message}\n`); });
-    child.on('close', (code) => { clearTimeout(timer); log.end(); resolve({ code, stdout }); });
+    child.on('close', (code) => { clearTimeout(timer); log.end(); resolve({ code, stdout, output }); });
     child.stdin.end(input);
   });
 }
@@ -155,6 +157,14 @@ function parseAudit(stdout) {
   try { text = JSON.parse(stdout.trim().split('\n').filter(Boolean).at(-1)).result ?? stdout; } catch { /* plain text */ }
   const verdicts = [...String(text).matchAll(/VERDICT:\s*(PASS|FAIL)/g)];
   return { text: String(text).trim(), verdict: verdicts.length ? verdicts.at(-1)[1] : null };
+}
+
+// Signs that Codex could not run any command at all: its runtime is broken, not the code.
+const CODEX_ENV_ERRORS = /helper_unknown_error|Failed to create unified exec process/g;
+/** True if Codex's output reports an environment failure. Codex echoes its prompt, which may quote earlier reports, so only extra occurrences count. */
+function codexEnvBroken(output, prompt) {
+  const count = (text) => (String(text).match(CODEX_ENV_ERRORS) ?? []).length;
+  return count(output) > count(prompt);
 }
 
 /** Both CLIs must be installed and on PATH before anything is committed. */
@@ -205,8 +215,18 @@ async function main() {
       // 1. Codex
       say(`${step.id} 第 ${attempt} 次：Codex 开始写代码…（日志 ${WORK}/logs/${step.id}-${attempt}-codex.log）`);
       if (existsSync(CODEX_LAST)) writeFileSync(CODEX_LAST, '');
-      const codex = await run(CODEX, CODEX_ARGS, codexPrompt(step, attempt, lastAudit), `${WORK}/logs/${step.id}-${attempt}-codex.log`, 3 * HOURS);
+      const codexLog = `${WORK}/logs/${step.id}-${attempt}-codex.log`;
+      const prompt = codexPrompt(step, attempt, lastAudit);
+      const codex = await run(CODEX, CODEX_ARGS, prompt, codexLog, 3 * HOURS);
       const summary = existsSync(CODEX_LAST) ? readFileSync(CODEX_LAST, 'utf8').trim() : '';
+      // Codex could not run commands: stop without committing, auditing or using up an attempt.
+      if (codexEnvBroken(codex.output, prompt)) {
+        state.attempts[step.id] = attempt - 1;
+        saveState(state);
+        writeFileSync(BLOCKED, `# 自动开发卡住了：Codex 运行环境出错\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 无法执行任何命令（日志里出现 helper_unknown_error / Failed to create unified exec process）。这是 Codex 运行环境的问题，不是代码问题，所以没有提交、没有审计，也不计入尝试次数。\n\n- Codex 日志：${codexLog}\n- 常见解决办法：在 %USERPROFILE%\\.codex\\config.toml 的 [windows] 段设置 sandbox = "unelevated"，关闭所有 Codex 进程后重试；可以先用 codex exec --sandbox read-only "运行 git status" 确认 Codex 能执行命令。\n- 处理完后：删除本文件，再运行 npm run autopilot。\n`);
+        say(`Codex 运行环境出错（helper_unknown_error），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
+        return 3;
+      }
       if (codex.code !== 0) say(`Codex 退出代码 ${codex.code}（仍然提交现有改动并交给审计判断）。`);
 
       // 2. Commit Codex's work
