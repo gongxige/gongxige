@@ -1,5 +1,17 @@
 # 开发日志
 
+## 2026-10-11 · 修复：登录/注册等平台页面在矮窗口和手机上显示不全
+
+**问题**：用户在 Chrome 里打开注册页，卡片下半部分被切掉。原因是 `body { overflow: hidden }` 原本给老虎机画面用（游戏画面不该滚动），却对所有页面生效，窗口不够高时玩家网站和后台页面都无法滚动。
+
+**做了什么**（`src/styles.css`）：`overflow: hidden` 改为只在游戏页生效（`body:has(.game-shell)`），其他页面恢复正常滚动；窗口高度 ≤ 760px 时收紧登录/注册卡片的上下间距，让常见笔记本和手机竖屏不用滚动就能看到整张卡片。
+
+**怎么验证的**：浏览器里量注册卡片位置：1366×600、375×667、360×640 下整张卡片都在一屏内、没有横向滚动条；667×375（手机横屏）可以滚动，所有按钮都能点到；游戏页 `body` 仍是 `overflow: hidden`。`npm run build`、`npm test` 通过。
+
+**遗留问题**：无。
+
+---
+
 ## 2026-10-11 · 自动接力跑完全部 11 步（汇总见 docs/workflow/REPORT.md）
 
 **做了什么**：`scripts/autopilot.mjs` 又改了三处：环境错误只认 Codex 自己的 `ERROR codex_core::tools::router … helper_unknown_error` 日志行（之前按关键词计数，Codex 读到 DEVLOG 里的说明就误判）；识别"Codex 用量额度用完"，停下、单独提交已写的部分（wip）、不审计、不计次数；新增人工开发模式 `AUTOPILOT_DEV=manual`（不调用 Codex，只审计已提交的代码，不通过就停下）。STEP-01 ~ STEP-07 由 Codex 完成，STEP-08 第 3 次和 STEP-09 ~ STEP-11 在 Codex 额度用完后由 Claude Code 完成，全部由独立的 Claude Code 审计通过。
