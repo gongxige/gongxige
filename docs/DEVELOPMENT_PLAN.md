@@ -110,7 +110,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [ ] 数据库代替 JSON 文件（以后需要再做）
 - [ ] 多平台、多档 RTP、平台后台接口签名（以后需要再做）
 
-### 阶段 7：模拟博彩平台（用户端 + 管理后台） ⏳ 自动开发中
+### 阶段 7：模拟博彩平台（用户端 + 管理后台） ✅
 
 需求见 [PLATFORM_TASK.md](PLATFORM_TASK.md)。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-01 ~ STEP-11 由 `npm run autopilot` 自动开发：Codex 写代码，Claude Code 审计，通过才进入下一步。进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
@@ -126,6 +126,18 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] STEP-09 后台：管理员、概览、玩家管理、操作日志：管理员账号与玩家分开（首次启动生成随机密码打印在终端），`/admin` 页面含概览、玩家列表/搜索/详情、冻结/解冻、必填原因的手动调整（与资金流水、操作日志同一事务）、操作日志；所有 `/api/admin/*` 及旧的 `/admin/state`、`/admin/fault` 都要求管理员会话，测试覆盖未登录和玩家 cookie 均返回 401（2026-10-11，Claude Code 人工开发模式）。
 - [x] STEP-10 后台：审核、流水、游戏记录、对账、故障模拟：充值/提现审核（拒绝提现退回冻结，状态变更带 `status = 'pending'` 条件，同一申请只能处理一次，测试含 10 个并发请求只成功 1 个）、全量交易流水（按玩家/类型/日期筛选）、全部玩家游戏记录与回放（签名 `scope: operator` 查询）、对账页（与流水逐项相等，不一致标红并显示差额）、故障模拟（写操作日志）（2026-10-11，Claude Code 人工开发模式）。
 - [x] STEP-11 端到端检查和收尾：新增 `npm run check:platform`（注册 → 充值申请 → 后台通过 → 玩 50 局 → 提现申请 → 后台通过 → 对账一致；余额不足不能提现、冻结金额不能下注、同一提现不能通过两次、同时 20 次下注不会扣成负数）；`npm start` 打印玩家网站和后台网址；新增 `npm run admin:password`、`npm run platform`；README 重写（2026-10-11，Claude Code 人工开发模式）。
+
+### 阶段 8：游戏打磨（照参考游戏做好 Wild Frontier） ⏳ 计划已写好，等用户确认后开工
+
+目标：手机上像成熟 H5 老虎机，拿给合作伙伴看不掉价。说明见 [GAME_POLISH_SPEC.md](GAME_POLISH_SPEC.md)，按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-12 ~ STEP-17 自动开发。只改画面和手感，不改 `src/engine/`。
+
+- [ ] STEP-12 手机上铺满屏幕、竖屏自动横向显示
+- [ ] STEP-13 顶部信息条、底部按钮条、MAX、自动旋转
+- [ ] STEP-14 夜景背景和转轴边框
+- [ ] STEP-15 转动手感：变慢、不糊
+- [ ] STEP-16 中奖展示：加框、变淡、赢分上数、大奖动画
+- [ ] STEP-17 符号图标统一和清晰化
+- [ ] 以后：后台"游戏管理"（游戏列表、上架/下架、维护模式、投注设置、按游戏统计；RTP 只显示不可改）
 
 ## 四、重要决定记录
 
