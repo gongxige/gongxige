@@ -7,6 +7,7 @@
 //   4. 通过 → 打标签 STEP-xx-passed，进入下一步；不通过 → 带着报告打回给 Codex 重做
 //   5. 同一步连续不通过 AUTOPILOT_MAX_ATTEMPTS 次（默认 4）→ 停下，写 docs/workflow/BLOCKED.md
 //   6. Codex 日志出现 helper_unknown_error 等环境错误 → 立刻停下写 BLOCKED.md，不提交、不审计、不计次数
+//      Codex 用量额度用完 → 同样停下、不审计、不计次数，已写的部分改动单独提交
 //
 // 随时可以按 Ctrl+C 停止；再运行 npm run autopilot 会从记录的位置接着做。
 // 想在当前这一步做完后停下：新建一个空文件 .autopilot/STOP。
@@ -163,10 +164,17 @@ function parseAudit(stdout) {
 // error log line counts ("<time>Z ERROR codex_core::tools::router: error=exec_command failed: ... helper_unknown_error"),
 // because docs and files that Codex reads may mention the same words.
 const CODEX_ENV_ERRORS = /^\S+\s+ERROR codex_core::tools::router: error=exec_command failed:.*(helper_unknown_error|Failed to create unified exec process)/gm;
-/** True if Codex's output reports an environment failure. Codex echoes its prompt, which may quote earlier logs, so only extra occurrences count. */
-function codexEnvBroken(output, prompt) {
-  const count = (text) => (String(text).match(CODEX_ENV_ERRORS) ?? []).length;
-  return count(output) > count(prompt);
+// Codex's account ran out of usage: every further attempt would fail at once.
+const CODEX_QUOTA_ERRORS = /^ERROR: You.ve hit your usage limit\..*$/gm;
+/**
+ * 'exec' or 'quota' if Codex's output reports an environment failure, else null.
+ * Codex echoes its prompt, which may quote earlier logs, so only extra occurrences count.
+ */
+function codexEnvProblem(output, prompt) {
+  const extra = (re) => (String(output).match(re) ?? []).length > (String(prompt).match(re) ?? []).length;
+  if (extra(CODEX_ENV_ERRORS)) return 'exec';
+  if (extra(CODEX_QUOTA_ERRORS)) return 'quota';
+  return null;
 }
 
 /** Both CLIs must be installed and on PATH before anything is committed. */
@@ -222,7 +230,18 @@ async function main() {
       const codex = await run(CODEX, CODEX_ARGS, prompt, codexLog, 3 * HOURS);
       const summary = existsSync(CODEX_LAST) ? readFileSync(CODEX_LAST, 'utf8').trim() : '';
       // Codex could not run commands: stop without committing, auditing or using up an attempt.
-      if (codexEnvBroken(codex.output, prompt)) {
+      const problem = codexEnvProblem(codex.output, prompt);
+      if (problem === 'quota') {
+        // Keep whatever Codex finished before the limit; the next run continues this same attempt.
+        state.attempts[step.id] = attempt - 1;
+        saveState(state);
+        const retryAt = String(codex.output).match(/try again at ([^.\r\n]+?)\.?\s*$/m)?.[1] ?? '稍后';
+        writeFileSync(BLOCKED, `# 自动开发暂停：Codex 用量额度用完\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 提示用量额度已用完（可在 ${retryAt} 后重试）。这不是代码问题，没有审计，也不计入尝试次数；Codex 已写的部分改动已单独提交，下次接着做。\n\n- Codex 日志：${codexLog}\n- 处理办法：等额度恢复后删除本文件，再运行 npm run autopilot。\n`);
+        commitAll(`wip: ${step.id} 第${attempt}次（未完成，Codex 用量额度用完）\n\n[autopilot] 未审计，下次运行继续这一次尝试`);
+        say(`Codex 用量额度用完（${retryAt} 后可重试），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
+        return 3;
+      }
+      if (problem === 'exec') {
         state.attempts[step.id] = attempt - 1;
         saveState(state);
         writeFileSync(BLOCKED, `# 自动开发卡住了：Codex 运行环境出错\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 无法执行任何命令（日志里出现 helper_unknown_error / Failed to create unified exec process）。这是 Codex 运行环境的问题，不是代码问题，所以没有提交、没有审计，也不计入尝试次数。\n\n- Codex 日志：${codexLog}\n- 常见解决办法：在 %USERPROFILE%\\.codex\\config.toml 的 [windows] 段设置 sandbox = "unelevated"，关闭所有 Codex 进程后重试；可以先用 codex exec --sandbox read-only "运行 git status" 确认 Codex 能执行命令。\n- 处理完后：删除本文件，再运行 npm run autopilot。\n`);
