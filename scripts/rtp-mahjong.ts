@@ -2,7 +2,7 @@ import { MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, settleFreeSpin, settleSpin } f
 
 const rounds = Number(process.argv[2] ?? 10_000_000);
 if (!Number.isSafeInteger(rounds) || rounds < 1) throw new Error('回合数必须是正整数');
-const bet = 100;
+const bet = 10_000;
 let state = 0x26_10_2026;
 const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state; };
 const stops = () => [next() % 100, next() % 100, next() % 100, next() % 100, next() % 100] as const;

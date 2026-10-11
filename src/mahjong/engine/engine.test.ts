@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BOARD_HEIGHTS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, evaluateWays, freeSpinsForHu, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PayTable, type Token } from './index.ts';
+import { BOARD_HEIGHTS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, evaluateWays, freeSpinsForHu, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PaidSymbolId, type PayTable, type Token } from './index.ts';
 
 const token = (symbolId: Token['symbolId']): Token => ({ symbolId });
 const payTable: PayTable = { FA: { 3: 10 }, ZHONG: { 3: 20 } };
@@ -65,6 +65,29 @@ describe('麻将连连胡 STEP-25 特殊牌、免费旋转与封顶引擎', () =
     assert.equal(evaluateWays([[token('ZHONG')], [token('WILD')], [token('ZHONG')]], 1, { ZHONG: { 3: 1 } })[0].ways, 1);
   });
 
+  it('九种普通付费牌均有 3/4/5 列赔付，且命中的金色牌都会变百搭', () => {
+    const symbols: readonly PaidSymbolId[] = ['FA', 'ZHONG', 'BAI', 'WAN8', 'DOT1', 'DOT2', 'DOT3', 'BAM1', 'BAM2'];
+    for (const symbolId of symbols) {
+      const payouts = MAHJONG_MATH_CONFIG.payTable[symbolId];
+      assert.ok(payouts?.[3]); assert.ok(payouts?.[4]); assert.ok(payouts?.[5]);
+      for (const run of [3, 4, 5] as const) {
+        const board = Array.from({ length: run }, () => [token(symbolId)]);
+        const [win] = evaluateWays(board, 10_000, { [symbolId]: { [run]: payouts[run] } });
+        assert.equal(win.symbolId, symbolId); assert.equal(win.run, run); assert.ok(win.payout > 0);
+      }
+      const goldStrips = [
+        [token(symbolId), token('HU'), token('HU'), token('HU')],
+        [{ symbolId, golden: true } as const, token('HU'), token('HU'), token('HU'), token('HU')],
+        [token(symbolId), token('HU'), token('HU'), token('HU'), token('HU')],
+        [token('HU'), token('HU'), token('HU'), token('HU'), token('HU')],
+        [token('HU'), token('HU'), token('HU'), token('HU')],
+      ] as const;
+      const outcome = settleSpin([0, 0, 0, 0, 0], 10_000, goldStrips, { [symbolId]: { 3: payouts[3] } });
+      assert.deepEqual(outcome.cascadeSteps[0].goldenTransforms, [{ x: 1, y: 0 }]);
+      assert.equal(outcome.cascadeSteps[0].afterBoard[1].some((entry) => entry.symbolId === 'WILD'), true);
+    }
+  });
+
   it('百搭不会替代胡，胡也不会参与消除或赔付', () => {
     const board = [[token('HU')], [token('WILD')], [token('HU')], [token('WILD')], [token('HU')]];
     assert.equal(evaluateWays(board, 1, { FA: { 3: 1 } }).length, 0);
@@ -102,7 +125,7 @@ describe('麻将连连胡 STEP-25 特殊牌、免费旋转与封顶引擎', () =
     const next = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed; };
     for (let index = 0; index < 2_100; index += 1) {
       const stops = [next() % 9, next() % 9, next() % 9, next() % 9, next() % 9] as const;
-      const original = settleSpin(stops, 2);
+      const original = settleSpin(stops, 10_000);
       assert.deepEqual(replaySpin(original.replayInput), original);
     }
   });
@@ -111,15 +134,15 @@ describe('麻将连连胡 STEP-25 特殊牌、免费旋转与封顶引擎', () =
     let seed = 0x26_10_2026;
     const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
     for (let index = 0; index < 2_000; index += 1) {
-      let outcome = settleSpin([next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], 100, MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
+      let outcome = settleSpin([next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], 10_000, MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
       let total = outcome.payout;
       let remaining = outcome.freeSpinsAwarded;
       while (remaining > 0 && !outcome.capped) {
-        const settled = settleFreeSpin({ bet: 100, remaining, parentTotalWin: total, capped: false }, [next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
+        const settled = settleFreeSpin({ bet: 10_000, remaining, parentTotalWin: total, capped: false }, [next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
         outcome = settled.outcome; total += outcome.payout; remaining = settled.state?.remaining ?? 0;
       }
       assert.equal(Number.isInteger(total), true);
-      assert.ok(total <= 100 * MAX_WIN_MULTIPLIER);
+      assert.ok(total <= 10_000 * MAX_WIN_MULTIPLIER);
     }
   });
 });
