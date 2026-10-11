@@ -16,8 +16,12 @@ import { ReelTape } from './reelTape.ts';
 // slows down over ANTICIPATION_SLOW_MS. Quick stop does not skip it. Purely
 // presentation: the result is fixed by the server before any reel stops.
 
-/** Time from pressing spin until the first reel starts to decelerate. */
-export const FIRST_STOP_MS = 500;
+/**
+ * Time from pressing spin until the first reel may start to decelerate. Equal to
+ * ACCEL_MS: braking begins as soon as the reel is at full speed, because at the
+ * slower, readable spin speed the braking itself takes about half a second.
+ */
+export const FIRST_STOP_MS = 120;
 /** Gap between consecutive reels starting to decelerate. */
 export const STOP_INTERVAL_MS = 400;
 /** Gap used when the player presses again to stop early. */

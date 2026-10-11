@@ -28,7 +28,7 @@ export function ControlBar(props: Props) {
       {autoOpen && <div className="auto-menu" role="menu">{[10, 25, 50, 100].map((count) => <button key={count} type="button" onClick={() => { setAutoOpen(false); onAuto(count); }}>{count} 次</button>)}</div>}
     </div>
     <button type="button" className={`spin-button ${winning ? 'is-win' : ''} ${canStop ? 'is-spinning' : ''} ${freeSpins ? 'is-free' : ''}`} onPointerDown={celebrating ? undefined : onSpinHoldStart} onPointerUp={celebrating ? undefined : onSpinHoldEnd} onPointerCancel={celebrating ? undefined : onSpinHoldEnd} onPointerLeave={celebrating ? undefined : onSpinHoldEnd} onClick={onSpin} disabled={spinDisabled && !celebrating}>
-      <span>{canStop ? 'STOP' : freeSpins ? '免费' : 'SPIN'}</span><small>{celebrating ? '跳过大奖动画' : spinning || autoRemaining !== null ? '停止自动旋转' : '长按自动旋转'}</small>
+      <span>{canStop ? 'STOP' : freeSpins ? '免费' : 'SPIN'}</span><small>{celebrating ? '跳过大奖动画' : autoRemaining !== null ? '停止自动旋转' : spinning ? '快速停止' : '长按自动旋转'}</small>
     </button>
   </footer>;
 }

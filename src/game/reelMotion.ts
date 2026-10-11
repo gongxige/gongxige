@@ -9,7 +9,8 @@
 
 /** Full speed, in symbols per millisecond. */
 export const SPIN_SPEED = 0.013;
-export const ACCEL_MS = 260;
+/** Short run-up, so the first reel can land about 0.8 s after pressing spin (reference ≈ 0.5 s). */
+export const ACCEL_MS = 120;
 /** Deceleration always covers at least this many symbols, so the landing symbols are placed off-screen. */
 export const MIN_STOP_DISTANCE = 5;
 export const OVERSHOOT = 0.28;

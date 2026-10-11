@@ -114,11 +114,11 @@ describe('SpinController', () => {
   it('waits for the minimum spin time, and for a slow server', () => {
     const fast = spinTo([1, 1, 1, 1, 1], 50);
     const slow = spinTo([1, 1, 1, 1, 1], 1500);
-    assert.ok(FIRST_STOP_MS >= 450 && FIRST_STOP_MS <= 550, `first reel starts stopping at ${FIRST_STOP_MS}ms`);
+    // Reference game (frame-by-frame): first reel ≈ 0.5 s, whole spin ≈ 2.3–2.5 s.
     assert.ok(STOP_INTERVAL_MS >= 400 && STOP_INTERVAL_MS <= 500, `reel stop interval is ${STOP_INTERVAL_MS}ms`);
-    assert.ok(fast.landings[0].at > FIRST_STOP_MS);
+    assert.ok(fast.landings[0].at >= 700 && fast.landings[0].at <= 900, `first reel landed at ${fast.landings[0].at}ms`);
     assert.ok(slow.landings[0].at > 1500);
-    assert.ok(fast.finishedAt >= 2300 && fast.finishedAt <= 2800, `normal spin finished at ${fast.finishedAt}ms`);
+    assert.ok(fast.finishedAt >= 2300 && fast.finishedAt <= 2600, `normal spin finished at ${fast.finishedAt}ms`);
     const gaps = fast.landings.slice(1).map((l, i) => l.at - fast.landings[i].at);
     // Reels start decelerating exactly STOP_INTERVAL_MS apart; the braking distance
     // varies by up to one symbol, so landings can drift by up to 2/SPIN_SPEED ms.
