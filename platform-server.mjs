@@ -96,6 +96,14 @@ function state() {
   return { players, transactions };
 }
 
+async function createLaunch(playerId) {
+  const player = db.prepare('SELECT id, username FROM players WHERE id = ?').get(playerId);
+  if (!player) throw new LedgerError('PLAYER_NOT_FOUND', 'Player not found');
+  const { status, body } = await signedPost(`${providerUrl}/provider/launch`, { operatorId, playerId: player.id, playerName: player.username, currency: 'DEMO' }, { secret, operatorId, timeoutMs: 90_000 });
+  if (status !== 200 || !body.gameUrl) throw new Error(body.error || `HTTP ${status}`);
+  return body;
+}
+
 async function launch(playerId, res) {
   const player = db.prepare('SELECT id, username FROM players WHERE id = ?').get(playerId);
   if (!player) return html(res, 404, '没有这个玩家');
@@ -129,6 +137,16 @@ const server = createServer(async (req, res) => {
       if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
       return json(res, 200, { player });
     }
+    if (req.method === 'GET' && url.pathname === '/games/wild-frontier/balance') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', 'Please log in');
+      return json(res, 200, { playerId: player.id, balance: getWallet(db, player.id).balance, currency: 'DEMO' });
+    }
+    if (req.method === 'POST' && url.pathname === '/games/wild-frontier/launch') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', 'Please log in');
+      return json(res, 200, await createLaunch(player.id));
+    }
     if (req.method === 'POST' && url.pathname === '/auth/password') {
       const player = currentPlayer(req);
       if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
@@ -136,6 +154,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (req.method === 'GET' && url.pathname === '/') return html(res, 200, '<meta charset="utf-8"><h1>演示平台</h1><p>仅虚拟积分。</p>');
+    if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { location: 'http://127.0.0.1:4173/' }); return res.end(); }
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, state());
     if (req.method === 'POST' && url.pathname === '/admin/fault') {

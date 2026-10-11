@@ -9,6 +9,6 @@ export default defineConfig({
     host: '127.0.0.1',
     port: Number(process.env.WEB_PORT ?? 4173),
     strictPort: true,
-    proxy: { '/api': `http://127.0.0.1:${apiPort}` }
+    proxy: { '/api': `http://127.0.0.1:${apiPort}`, '/auth': 'http://127.0.0.1:8788', '/games': 'http://127.0.0.1:8788' }
   }
 });
