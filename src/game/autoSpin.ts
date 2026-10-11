@@ -30,3 +30,8 @@ export function highestAllowedBet(bets: readonly number[]): number {
   if (!bets.length) throw new Error('At least one bet is required');
   return Math.max(...bets);
 }
+
+/** Keep wager controls locked for the entire automatic-play run, including gaps. */
+export function isBetChangeLocked(spinning: boolean, inFreeSpins: boolean, autoSpinning: boolean): boolean {
+  return spinning || inFreeSpins || autoSpinning;
+}

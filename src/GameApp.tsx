@@ -7,7 +7,7 @@ import { RulesModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
 import { BigWin, bigWinTier } from './ui/BigWin.tsx';
 import { useWinCycle } from './useWinCycle.ts';
-import { highestAllowedBet, LONG_PRESS_MS } from './game/autoSpin.ts';
+import { AutoSpinController, highestAllowedBet, isBetChangeLocked, LONG_PRESS_MS, type AutoStopReason } from './game/autoSpin.ts';
 
 type Config = { engineVersion?: string; protocol?: string; title: string; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; lobbyUrl?: string };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
@@ -94,10 +94,21 @@ export default function GameApp() {
   const [roundId, setRoundId] = useState('');
   const [autoRemaining, setAutoRemaining] = useState<number | null>(null);
   const [insufficientFunds, setInsufficientFunds] = useState(false);
+  const autoSpin = useRef(new AutoSpinController());
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heldSpin = useRef(false);
   const displayWin = useCountUp(win.amount, win.bet);
   const inFreeSpins = freeSpins !== null;
+
+  const stopAuto = (reason: AutoStopReason) => {
+    autoSpin.current.stop(reason);
+    setAutoRemaining(null);
+  };
+
+  const startAuto = (count: number) => {
+    autoSpin.current.start(count);
+    setAutoRemaining(autoSpin.current.remaining);
+  };
 
   const loadSession = async () => {
     const session = await fetchJson<{ credits: number; freeSpins: FreeSpins | null }>(`/api/session?token=${encodeURIComponent(token)}`);
@@ -116,16 +127,16 @@ export default function GameApp() {
   }, []);
 
   const spin = (automatic = false) => {
-    if (spinning) { if (!automatic) setAutoRemaining(null); reels.quickStop(); return; }
-    if (!automatic && autoRemaining !== null) { setAutoRemaining(null); setMessage('自动旋转已停止'); return; }
+    if (spinning) { if (!automatic) stopAuto('player-stopped'); reels.quickStop(); return; }
+    if (!automatic && autoSpin.current.active) { stopAuto('player-stopped'); setMessage('自动旋转已停止'); return; }
     if (!config || modal || overlay || celebrating || staleApi || noSession) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
-    if (!freeSpins && credits < bet) { setAutoRemaining(null); setInsufficientFunds(true); return; }
+    if (!freeSpins && credits < bet) { stopAuto('insufficient-funds'); setInsufficientFunds(true); return; }
 
     if (automatic) {
-      if (autoRemaining === null || autoRemaining <= 0) return;
-      setAutoRemaining(autoRemaining - 1);
+      if (!autoSpin.current.takeSpin()) return;
+      setAutoRemaining(autoSpin.current.remaining);
     }
 
     setError('');
@@ -138,13 +149,13 @@ export default function GameApp() {
     let result: SpinResult | null = null;
     reels.start(() => {
       setSpinning(false);
-      if (!result) { setAutoRemaining(null); loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
+      if (!result) { stopAuto('request-error'); loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
       setRoundId(result.roundId);
       setWin({ amount: result.payout, bet: result.bet, wins: result.wins });
       if (result.mode === 'free' && result.multipliers) reels.showMultipliers(result.multipliers);
       setFreeSpins(result.freeSpins ?? null);
-      if (result.freeSpins) setAutoRemaining(null);
+      if (result.freeSpins) stopAuto('free-spins');
       setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');
       if (result.settlementPending) setError('平台派彩稍有延迟，赢分会自动到账。');
@@ -162,7 +173,7 @@ export default function GameApp() {
         reels.setResult(body.stops);
       })
       .catch((e: Error) => {
-        setAutoRemaining(null);
+        stopAuto('request-error');
         if (e instanceof ApiError && e.code === 'SESSION_INVALID') setNoSession(true); else setError(e.message);
         reels.setResult(null);
       });
@@ -178,10 +189,10 @@ export default function GameApp() {
   // Paid auto spins start only after the prior result is settled. This keeps a
   // stale local balance from ever submitting an extra wager.
   useEffect(() => {
-    if (autoRemaining === null || spinning || overlay || celebrating || modal) return;
-    if (freeSpins) { setAutoRemaining(null); return; }
-    if (autoRemaining <= 0) { setAutoRemaining(null); return; }
-    if (credits < bet) { setAutoRemaining(null); setInsufficientFunds(true); return; }
+    if (!autoSpin.current.active || spinning || overlay || celebrating || modal) return;
+    if (freeSpins) { stopAuto('free-spins'); return; }
+    if (autoSpin.current.remaining === 0) { stopAuto('player-stopped'); return; }
+    if (credits < bet) { stopAuto('insufficient-funds'); setInsufficientFunds(true); return; }
     const timer = setTimeout(() => spinRef.current(true), 280);
     return () => clearTimeout(timer);
   }, [autoRemaining, spinning, overlay, celebrating, modal, freeSpins, credits, bet]);
@@ -253,7 +264,7 @@ export default function GameApp() {
       {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
       {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href="/">打开平台大厅</a></div>}
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
-      <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} autoRemaining={autoRemaining} onRules={() => setModal('rules')} onMax={() => setBet(highestAllowedBet(config?.allowedBets ?? ALLOWED_BETS))} onAuto={(count) => { if (count) { if (credits < bet) { setInsufficientFunds(true); return; } setAutoRemaining(count); } else setAutoRemaining(null); }} onSpinHoldStart={() => { heldSpin.current = false; holdTimer.current = setTimeout(() => { heldSpin.current = true; if (!spinning && !inFreeSpins && credits >= bet) setAutoRemaining(50); }, LONG_PRESS_MS); }} onSpinHoldEnd={() => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; }} onSpin={() => { if (!heldSpin.current) spin(); heldSpin.current = false; }} />
+      <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={isBetChangeLocked(spinning, inFreeSpins, autoSpin.current.active)} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} autoRemaining={autoRemaining} onRules={() => setModal('rules')} onMax={() => setBet(highestAllowedBet(config?.allowedBets ?? ALLOWED_BETS))} onAuto={(count) => { if (count) { if (credits < bet) { setInsufficientFunds(true); return; } startAuto(count); } else stopAuto('player-stopped'); }} onSpinHoldStart={() => { heldSpin.current = false; if (autoSpin.current.active) return; holdTimer.current = setTimeout(() => { if (!spinning && !inFreeSpins && !autoSpin.current.active && credits >= bet) { heldSpin.current = true; startAuto(50); } }, LONG_PRESS_MS); }} onSpinHoldEnd={() => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; }} onSpin={() => { if (!heldSpin.current) spin(); heldSpin.current = false; }} />
       {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
       {insufficientFunds && <div className="modal-backdrop" role="alertdialog" aria-modal="true" aria-label="余额不足"><section className="modal-card insufficient-card"><h2>提示</h2><p>余额不足，请回大厅充值</p><div className="modal-actions"><button type="button" onClick={() => setInsufficientFunds(false)}>确定</button><a className="primary" href="/">返回大厅</a></div></section></div>}
     </section>
