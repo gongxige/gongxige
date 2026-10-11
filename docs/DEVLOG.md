@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-10-11 · 阶段 7 准备：Codex 写、Claude Code 审计的自动接力
+
+**用户需求**：做一个模拟博彩平台（注册、登录、充值、提现、后台管理）接入游戏；由 Codex 按计划一步一步写，写完自动交给 Claude Code 审计，通过进入下一步、不通过打回重做，全程不需要用户转发；每一步都记录在 Git 里，可以回退。
+
+**做了什么**
+
+- `docs/PLATFORM_TASK.md`：平台需求（只用虚拟积分，充值提现为模拟审核）。
+- `docs/WORKFLOW_PLAN.md`：STEP-01 ~ STEP-11，每步有"要做什么"和"验收标准"。
+- `AGENTS.md`：给 Codex 的规则（只做当前一步、不碰 Git 历史和流程文件、不改引擎、只用虚拟积分、每步更新计划和日志）。
+- `docs/workflow/AUDITOR.md`：审计清单（验收、范围、钱的正确性、安全、演示边界、记录）和固定输出格式，最后一行 `VERDICT: PASS/FAIL`。
+- `scripts/autopilot.mjs`（`npm run autopilot`）：检查 codex / claude / git → 未提交改动先提交为基线 → 每步：Codex（`codex exec --sandbox workspace-write`）→ 提交 → Claude Code 只读审计（`claude -p --permission-mode dontAsk`，只允许读文件、git 查看、npm 检查命令）→ 报告存 `docs/audits/` 并提交 → 通过打标签 `STEP-xx-passed`，不通过带报告重做；连续 4 次不通过写 `BLOCKED.md` 停下；支持续跑、`.autopilot/STOP`、`AUTOPILOT_ONLY_STEP`。
+
+**怎么验证的**
+
+- 用假的 codex / claude 脚本在临时副本里跑：打回后再通过、连续不通过停下、删 BLOCKED.md 后续跑且报告编号不重复、审计没给结论按不通过、只跑到指定步骤、STOP 文件。Git 历史、标签、PROGRESS.md、state.json 都符合预期。
+
+**遗留问题**
+
+- 还没有用真的 Codex 和 Claude Code 跑过；不同版本的命令行参数可能不同，可用 `AUTOPILOT_CODEX_ARGS` 调整。
+- Codex 的沙箱可能不允许它自己跑 `npm run check:provider`（要开本机端口）；审计时 Claude Code 会自己跑这些检查。
+
+---
+
+## 2026-10-11 · 按游戏供应商的方式对接模拟平台（阶段 6）
+
+**用户需求**：研究"游戏供应商把游戏通过 API 接给平台"的做法，以本项目为例做出来，看效果。
+
+**做了什么**
+
+- 引擎：`replaySpin({ bet, mode, stops, multipliers })` 不用随机数重现一局，并检查停点、倍数是否可能出现；`spin` 改为"抽随机数 → 调 replaySpin"。规则没变，ENGINE_VERSION 仍是 dfb08004，RTP 仍是 96.41%。
+- 新增 `mock-operator.mjs`（模拟平台，8788）：玩家一、玩家二两个钱包（玩家一沿用原来的 7,538 积分）；`/wallet/balance|bet|win|refund` 需要 HMAC-SHA256 签名，同一交易号重发只算一次，回滚可以作废还没到的扣款；大厅页面每 2 秒刷新余额、流水和对账，可"+10,000"、模拟"派彩连续失败 4 次""下一次扣款超时"。
+- 重写 `server.mjs`（游戏服务器）：不再保存余额；`POST /provider/launch`（签名）开 24 小时会话、返回 `/?token=…`；每局流程：扣款 → 出结果 → 写永久记录 → 派彩；扣款两次 3 秒没答复就取消并回滚；派彩当场重试 3 次，再失败进待派彩队列（2 秒检查一次，间隔 5 秒到 1 分钟）自动补发；同一玩家同时只处理一局；状态常驻内存、原子写文件。
+- 新增 `server/http.mjs`（签名、JSON、原子写）、`server/rounds.mjs`（只追加的局记录）、`server/replay-page.mjs`（回放页面）；`docs/PROVIDER_API.md`（接口文档）。
+- 前端：用网址里的 token 读余额、旋转；右上角（原测试管理按钮的位置）显示局号；会话无效时提示回平台大厅；派彩延迟、扣款未确认时给出提示。保留了用户未提交的"去掉测试管理"改动。
+- `npm start` 同时启动平台；启动脚本同时核对规则版本和接口版本（`provider-v1`）。`.claude/launch.json` 改为三个检查用服务（8798 / 8797 / 4183，单独存档）。
+
+**怎么验证的**
+
+- `npm test` 33/33（新增 2 个：2,000 局回放与原局完全相同；不可能的停点和倍数会被拒绝）；`npm run rtp` 理论 96.41%，30 万次模拟 96.20%。
+- `npm run check:provider 200` 全部通过：伪造签名被拒、无会话不能转、重复交易号不重复扣、连转 200 局每局余额 = 上局 − 投注 + 赢分且与平台一致、每局可回放且一致、每局正好 1 笔派彩（付费局 1 笔扣款）、派彩故障后自动补发、扣款超时后回滚、余额不足拒绝。
+- 浏览器（esbuild 打包同一份源码 + 三个服务）：从大厅进入、连转 8 局、局号显示、回放页"完全一致"、不带 token 打开提示回大厅、两种故障的提示文字、大厅对账"✓ 一致"，页面无报错。
+
+**遗留问题**
+
+- 助手的环境装不了本项目的依赖（npm 被拦），所以 `npm run build`（tsc + vite）没有在这里跑过；引擎和脚本用 TypeScript 6 做过类型检查。请在本机跑一次 `npm run build`。
+- 改动还没提交 Git（助手这边的 Git 不能删除锁文件）。
+- 数据都在 JSON 文件里，只适合本机单进程；回放和流水接口没有权限控制。
+
+---
+
 ## 2026-10-10 · 修复：大奖数字滚动被整段跳过
 
 **现象**：用户想看特效，播放 `?preview-bigwin=60` 时，打开约 1 秒就已经是最终数字 4,800 并提示"点击继续"，随后自动关闭。

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ALLOWED_BETS, BET_MULTIPLIER, REEL_STRIPS, ROWS, WAYS_PAYTABLE, WILD_REELS, computeRtp, evaluate, gridFromStops, playRound, spin, windowAt, type Grid, type MultiplierGrid, type SymbolId } from './index.ts';
+import { ALLOWED_BETS, BET_MULTIPLIER, REEL_STRIPS, ROWS, WAYS_PAYTABLE, WILD_REELS, computeRtp, evaluate, gridFromStops, playRound, replaySpin, spin, windowAt, type Grid, type MultiplierGrid, type SymbolId } from './index.ts';
 
 /** Write grids the way they look on screen (one string per row), get grid[reel][row]. */
 function grid(...rows: string[]): Grid {
@@ -224,6 +224,27 @@ describe('spin', () => {
   it('only accepts the allowed bets', () => {
     assert.throws(() => spin(123, () => 0));
     for (const allowed of ALLOWED_BETS) assert.doesNotThrow(() => spin(allowed, () => 0));
+  });
+});
+
+describe('replay', () => {
+  it('rebuilds every spin exactly from its stops and multipliers', () => {
+    let a = 7;
+    const randomInt = (max: number) => { a = (Math.imul(a, 1103515245) + 12345) >>> 0; return a % max; };
+    for (let i = 0; i < 2000; i += 1) {
+      const mode = i % 3 === 0 ? 'free' : 'base';
+      const original = spin(ALLOWED_BETS[i % ALLOWED_BETS.length], randomInt, 1000, mode);
+      const replayed = replaySpin({ bet: ALLOWED_BETS[i % ALLOWED_BETS.length], mode, stops: original.stops, multipliers: original.multipliers }, 1000);
+      assert.deepEqual(replayed, original);
+    }
+  });
+
+  it('rejects records that could not have come from a real spin', () => {
+    const ones = REEL_STRIPS.map(() => Array(ROWS).fill(1));
+    assert.throws(() => replaySpin({ bet, mode: 'base', stops: [0, 0, 0, 0, REEL_STRIPS[4].length], multipliers: ones }));
+    assert.throws(() => replaySpin({ bet, mode: 'base', stops: [0, 0, 0, 0, 1.5], multipliers: ones }));
+    const doubled = ones.map((column) => column.map(() => 2));
+    assert.throws(() => replaySpin({ bet, mode: 'base', stops: [0, 0, 0, 0, 0], multipliers: doubled }));
   });
 });
 

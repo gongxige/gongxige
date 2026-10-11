@@ -184,3 +184,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .reel-slot[data-multiplier]::after { content: attr(data-multiplier); position: absolute; right: 6%; bottom: 6%; z-index: 2; padding: .1cqw .7cqw; border: .15cqw solid #fff3b0; border-radius: 1cqw; background: linear-gradient(#ff5a5a, #a3001b); color: #fff; font: 900 1.6cqw/1.2 Georgia, serif; text-shadow: 0 .1cqw 0 #5a0010; box-shadow: 0 0 .8cqw #ff3d3d; animation: badge-in .4s cubic-bezier(.2,1.6,.4,1) both; }
 @keyframes badge-in { from { scale: 0; } to { scale: 1; } }
 .rules-heading { margin: 14px 0 4px; font-size: 16px; color: #ffe39a; } .rules-list { margin: 0; padding-left: 20px; color: #e4d5ef; } .rules-list li { margin: 4px 0; }
+/* Round ID of the last spin (operator / support can replay it by this ID). */
+.round-id { position: absolute; right: .9cqw; top: 1.5cqw; z-index: 4; width: 8.8cqw; color: #ffffffa0; font: 600 .85cqw/1.5 ui-monospace, Consolas, monospace; text-align: center; word-break: break-all; }
+.round-id span { display: block; color: #fff3c4; user-select: all; }
+.toast.is-blocking a { display: block; margin-top: .8cqw; color: #ffe27a; font-weight: 700; }

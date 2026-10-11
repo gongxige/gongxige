@@ -1,7 +1,45 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "api-check", "runtimeExecutable": "node", "runtimeArgs": ["server.mjs"], "port": 8797, "env": { "API_PORT": "8797", "STATE_FILE": "check-state.json" } },
-    { "name": "web-check", "runtimeExecutable": "npx", "runtimeArgs": ["vite"], "port": 4183, "env": { "API_PORT": "8797", "WEB_PORT": "4183" } }
+    {
+      "name": "operator-check",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "mock-operator.mjs"
+      ],
+      "port": 8798,
+      "env": {
+        "OPERATOR_PORT": "8798",
+        "API_PORT": "8797",
+        "WEB_PORT": "4183",
+        "OPERATOR_STATE_FILE": "check-operator-state.json"
+      }
+    },
+    {
+      "name": "api-check",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server.mjs"
+      ],
+      "port": 8797,
+      "env": {
+        "API_PORT": "8797",
+        "OPERATOR_PORT": "8798",
+        "WEB_PORT": "4183",
+        "STATE_FILE": "check-game-server-state.json"
+      }
+    },
+    {
+      "name": "web-check",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite"
+      ],
+      "port": 4183,
+      "env": {
+        "API_PORT": "8797",
+        "WEB_PORT": "4183"
+      }
+    }
   ]
 }

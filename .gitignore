@@ -8,3 +8,6 @@ data/
 # 参考素材体积大（视频拆帧、截图、旧版 HTML），只保留在本机，不进仓库
 reference/
 .video-tools/
+
+# 自动开发脚本的临时文件和日志
+.autopilot/

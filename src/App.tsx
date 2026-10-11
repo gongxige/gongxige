@@ -3,15 +3,16 @@ import { ALLOWED_BETS, ENGINE_VERSION, type SymbolId, type Win } from './engine/
 import { ReelBoard } from './ReelBoard.tsx';
 import { useReels } from './useReels.ts';
 import { ControlBar } from './ui/ControlBar.tsx';
-import { RulesModal, SettingsModal } from './ui/Modals.tsx';
+import { RulesModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
 import { BigWin, bigWinTier } from './ui/BigWin.tsx';
 import { useWinCycle } from './useWinCycle.ts';
 
-type Config = { engineVersion?: string; title: string; startingCredits: number; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; updatedAt: string | null };
+type Config = { engineVersion?: string; protocol?: string; title: string; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; lobbyUrl?: string };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
 type SpinResult = {
   engineVersion?: string;
+  roundId: string;
   mode: 'paid' | 'free';
   bet: number;
   stops: number[];
@@ -22,6 +23,8 @@ type SpinResult = {
   payout: number;
   capped: boolean;
   credits: number;
+  /** The operator has not confirmed the win yet; the server keeps retrying. */
+  settlementPending?: boolean;
   freeSpinsAwarded: number;
   freeSpins: FreeSpins | null;
   freeSpinsFinished: { played: number; totalWin: number } | null;
@@ -32,13 +35,22 @@ type Overlay = { kind: 'awarded'; count: number; retrigger: boolean } | { kind: 
 const FREE_SPIN_DELAY_MS = { win: 1600, noWin: 700 };
 const OVERLAY_MS = { awarded: 2600, finished: 3600 };
 
-const sessionId = 'local-browser-demo-v1';
-const STALE_API_MESSAGE = '本机测试服务（npm run api）还是旧版本，规则和网页不一致。请在运行它的终端按 Ctrl+C，再重新运行 npm run api，然后刷新本页。';
+/** Must match SERVER_PROTOCOL in server.mjs. */
+const PROTOCOL = 'provider-v1';
+// The operator's lobby opens the game with ?token=…; the token identifies the player's session on the game server.
+const token = new URLSearchParams(location.search).get('token') ?? '';
+const STALE_API_MESSAGE = '游戏服务器还是旧版本，规则和网页不一致。请在运行 npm start 的终端按 Ctrl+C，再重新运行 npm start，然后从平台大厅重新进入。';
+
+class ApiError extends Error {
+  code?: string;
+  lobbyUrl?: string;
+  constructor(message: string, code?: string, lobbyUrl?: string) { super(message); this.code = code; this.lobbyUrl = lobbyUrl; }
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || '本机测试服务未启动');
+  if (!response.ok) throw new ApiError(body.error || '游戏服务器未启动', body.code, body.lobbyUrl);
   return body as T;
 }
 
@@ -73,14 +85,17 @@ export default function App() {
   const [error, setError] = useState('');
   // The API process was started before the current game rules: refuse to spin.
   const [staleApi, setStaleApi] = useState(false);
-  const [modal, setModal] = useState<'rules' | 'settings' | null>(null);
+  const [modal, setModal] = useState<'rules' | null>(null);
   const [freeSpins, setFreeSpins] = useState<FreeSpins | null>(null);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  // No valid session (opened without ?token= or it expired): the player must come in through the operator's lobby.
+  const [noSession, setNoSession] = useState(false);
+  const [roundId, setRoundId] = useState('');
   const displayWin = useCountUp(win.amount, win.bet);
   const inFreeSpins = freeSpins !== null;
 
   const loadSession = async () => {
-    const session = await fetchJson<{ credits: number; freeSpins: FreeSpins | null }>(`/api/session?sessionId=${encodeURIComponent(sessionId)}`);
+    const session = await fetchJson<{ credits: number; freeSpins: FreeSpins | null }>(`/api/session?token=${encodeURIComponent(token)}`);
     setCredits(session.credits);
     setFreeSpins(session.freeSpins ?? null);
   };
@@ -88,19 +103,19 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const next = await fetchJson<Config>('/api/config');
-      if (next.engineVersion !== ENGINE_VERSION) setStaleApi(true);
+      if (next.engineVersion !== ENGINE_VERSION || next.protocol !== PROTOCOL) setStaleApi(true);
       setConfig(next);
       setBet((current) => (next.allowedBets.includes(current) ? current : next.allowedBets[0]));
       await loadSession();
-    })().catch((e: Error) => setError(e.message));
+    })().catch((e: Error) => { if (e instanceof ApiError && e.code === 'SESSION_INVALID') setNoSession(true); else setError(e.message); });
   }, []);
 
   const spin = () => {
     if (spinning) { reels.quickStop(); return; }
-    if (!config || modal || overlay || celebrating || staleApi) return;
+    if (!config || modal || overlay || celebrating || staleApi || noSession) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
-    if (!freeSpins && credits < bet) { setError('演示积分不足。'); return; }
+    if (!freeSpins && credits < bet) { setError('平台余额不足。'); return; }
 
     setError('');
     setWin({ amount: 0, bet: spinBet, wins: [] });
@@ -114,25 +129,30 @@ export default function App() {
       setSpinning(false);
       if (!result) { loadSession().catch(() => {}); setMessage('本次请求失败，余额已重新读取'); return; }
       setCredits(result.credits);
+      setRoundId(result.roundId);
       setWin({ amount: result.payout, bet: result.bet, wins: result.wins });
       if (result.mode === 'free' && result.multipliers) reels.showMultipliers(result.multipliers);
       setFreeSpins(result.freeSpins ?? null);
       setMessage(result.payout > 0 ? '' : result.mode === 'free' ? '本局未中奖' : '本局未中奖，再来一次');
       if (result.capped) setError('本局赢分已达单次最大赢分上限。');
+      if (result.settlementPending) setError('平台派彩稍有延迟，赢分会自动到账。');
       const next: Overlay | null = result.freeSpinsAwarded > 0
         ? { kind: 'awarded', count: result.freeSpinsAwarded, retrigger: result.mode === 'free' }
         : result.freeSpinsFinished ? { kind: 'finished', ...result.freeSpinsFinished } : null;
       // A big win is celebrated first; any free-spin announcement follows it.
       if (bigWinTier(result.payout, result.bet)) { setCelebrating(true); setPendingOverlay(next); } else setOverlay(next);
     });
-    fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, sessionId }) })
+    fetchJson<SpinResult>('/api/spin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet, token }) })
       .then((body) => {
         // Never land the reels on a result computed with different rules.
         if (body.engineVersion !== ENGINE_VERSION) { setStaleApi(true); reels.setResult(null); return; }
         result = body;
         reels.setResult(body.stops);
       })
-      .catch((e: Error) => { setError(e.message); reels.setResult(null); });
+      .catch((e: Error) => {
+        if (e instanceof ApiError && e.code === 'SESSION_INVALID') setNoSession(true); else setError(e.message);
+        reels.setResult(null);
+      });
   };
 
   // Free spins play themselves: spin again shortly after each one lands.
@@ -175,30 +195,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const saveSettings = async (maxWinMultiplier: number) => {
-    try {
-      const body = await fetchJson<Config>('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ maxWinMultiplier }) });
-      setConfig(body);
-      setModal(null);
-      setError('本机测试参数已保存。');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败');
-    }
-  };
-
   const showWin = !spinning && win.amount > 0;
   // Winning symbols animate: all wins together, then one win at a time.
   const cycle = useWinCycle(showWin ? win.wins : null, celebrating);
   const highlightKey = cycle ? cycle.cells.join(',') : '';
   useEffect(() => { reels.highlight(highlightKey ? highlightKey.split(',') : null); }, [highlightKey, reels.highlight]);
   // During free spins the button only works as "stop".
-  const spinDisabled = !config || staleApi || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
+  const spinDisabled = !config || staleApi || noSession || (!spinning && (inFreeSpins || overlay !== null || celebrating || credits < bet));
   const shownBet = freeSpins ? freeSpins.bet : bet;
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
   return <main className="game-shell">
     <section className={`stage ${showWin ? 'has-win' : ''} ${inFreeSpins ? 'is-free' : ''}`} aria-label="Wild Frontier 1024 Ways">
-      <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} disabled={spinning || inFreeSpins} onRules={() => setModal('rules')} onSettings={() => setModal('settings')} />
+      <TopBar credits={credits} bet={shownBet} win={showWin ? win.amount : 0} disabled={spinning || inFreeSpins} onRules={() => setModal('rules')} />
       <div className="reel-frame" aria-hidden="true" />
       <div className="pillar left" aria-hidden="true"><span>1024 WAYS</span></div>
       <div className="pillar right" aria-hidden="true"><span>1024 WAYS</span></div>
@@ -214,12 +223,13 @@ export default function App() {
             : <><strong>免费游戏结束</strong><span>共 {overlay.played} 局 · 总赢分 <b>{overlay.totalWin.toLocaleString('zh-CN')}</b></span></>}
         </button>
       )}
+      {roundId && <div className="round-id" title="把局号发给平台或客服，可以查到这一局的回放">局号<span>{roundId}</span></div>}
       {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
-      {error && !staleApi && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
+      {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href={config?.lobbyUrl ?? 'http://127.0.0.1:8788'}>打开平台大厅</a></div>}
+      {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
       <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
     </section>
     <p className="rotate-hint">横屏体验更好</p>
     {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
-    {modal === 'settings' && config && <SettingsModal rtp={config.theoreticalRtp} maxWinMultiplier={config.maxWinMultiplier} onSave={saveSettings} onClose={() => setModal(null)} />}
   </main>;
 }
