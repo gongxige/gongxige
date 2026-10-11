@@ -308,8 +308,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .mj-stats strong { font: 700 2.3cqw/1 Georgia, serif; font-variant-numeric: tabular-nums; }
 .mj-stats .gold { color: #ffd84d; } .mj-stats .red { color: #ff8a8a; }
 .mj-demo { position: absolute; left: 0; right: 0; bottom: -2.2cqw; margin: 0; text-align: center; font-size: 1cqw; color: #ffe9a8cc; pointer-events: none; }
-.mj-title { position: absolute; top: 18%; left: 0; right: 0; text-align: center; font: 800 2.2cqw/1 "KaiTi", "STKaiti", serif; color: #ffd36a; letter-spacing: .6cqw; text-shadow: 0 .2cqw 0 #5a2a00; }
-.mj-board { --mj-cell: min(6.3cqw, calc((59cqh - 3.4cqw) / 5)); --mj-gap: .35cqw; position: absolute; left: 50%; top: 23.5%; height: calc(5 * var(--mj-cell) + 4 * var(--mj-gap) + 2cqw); translate: -50% 0; display: flex; gap: .8cqw; align-items: center; padding: 1cqw 1.4cqw; border: .35cqw solid #c9961f; border-radius: 1.4cqw; background: #0c3323cc; box-shadow: 0 0 2cqw #000a, inset 0 0 1.4cqw #000a; }
+.mj-board { --mj-cell: min(6.2cqw, calc((57cqh - 3.4cqw) / 5)); --mj-gap: .35cqw; position: absolute; left: 50%; top: 25.5%; height: calc(5 * var(--mj-cell) + 4 * var(--mj-gap) + 2cqw); translate: -50% 0; display: flex; gap: .8cqw; align-items: center; padding: 1cqw 1.4cqw; border: .35cqw solid #c9961f; border-radius: 1.4cqw; background: #0c3323cc; box-shadow: 0 0 2cqw #000a, inset 0 0 1.4cqw #000a; }
 .mj-col { position: relative; width: 7.6cqw; height: calc(5 * var(--mj-cell) + 4 * var(--mj-gap)); overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: var(--mj-gap); }
 .mj-col.rows-4 { height: calc(4 * var(--mj-cell) + 3 * var(--mj-gap)); }
 .mj-cell { height: var(--mj-cell); flex: none; display: grid; place-items: center; }
@@ -333,3 +332,24 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .mj-rules-note { font-size: 12px; color: #e8d6f0; }
 @media (prefers-reduced-motion: reduce) { .mj-col.is-spinning .mj-strip { animation-duration: .6s; } }
 .mj-rules > button { display: block; margin: 12px auto 0; min-width: 140px; min-height: 40px; border: 2px solid #d5ffbf; border-radius: 10px; background: linear-gradient(#b5ff7d, #42b924 50%, #16720f); color: #fff; font: 800 16px/1 system-ui, "Microsoft YaHei", sans-serif; cursor: pointer; }
+/* STEP-29: multiplier bar and cascade frames */
+.mj-multipliers { position: absolute; top: 18%; left: 50%; translate: -50% 0; display: flex; gap: .8cqw; }
+.mj-multipliers span { min-width: 5.4cqw; padding: .45cqw .8cqw; border: .18cqw solid #8a6a2a; border-radius: 1cqw; background: #2a1a08cc; color: #c9a86a; text-align: center; font: 800 1.7cqw/1 Georgia, serif; transition: transform .2s, background .2s; }
+.mj-multipliers span.is-passed { color: #f5d790; border-color: #c9961f; }
+.mj-multipliers span.is-active { background: linear-gradient(#ffe08a, #e0a12a); color: #5a2a00; border-color: #fff3b0; transform: scale(1.18); box-shadow: 0 0 1.2cqw #ffcf4a; }
+.mj-cell.is-win .mj-tile { animation: mj-win-pulse .35s ease-in-out infinite alternate; filter: drop-shadow(0 0 .8cqw #ffd84d); }
+.mj-cell.is-dim .mj-tile { filter: brightness(.6) saturate(.7); }
+.mj-cell.is-clear .mj-tile { animation: mj-clear .32s ease-in forwards; }
+.mj-cell.is-flip .mj-tile { animation: mj-flip .32s ease-out; filter: drop-shadow(0 0 1cqw #e7c3ff); }
+.mj-cell.is-drop .mj-tile { animation: mj-drop .42s cubic-bezier(.3,1.4,.5,1); }
+@keyframes mj-win-pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+@keyframes mj-clear { to { transform: scale(.2) rotate(-12deg); opacity: 0; } }
+@keyframes mj-flip { from { transform: rotateY(90deg); } to { transform: rotateY(0); } }
+@keyframes mj-drop { from { transform: translate3d(0, -140%, 0); opacity: .4; } to { transform: translate3d(0, 0, 0); opacity: 1; } }
+.mj-overlay { position: absolute; inset: 0; z-index: 20; display: grid; place-content: center; justify-items: center; gap: 1.2cqw; border: 0; background: radial-gradient(circle, #6e1218ee, #1a0306f2 70%); color: #fff; cursor: pointer; }
+.mj-overlay strong { font: 900 5cqw/1.1 "KaiTi", "STKaiti", serif; color: #ffd84d; text-shadow: 0 .3cqw 0 #6b3300, 0 0 2cqw #ffb300; animation: mj-pop .5s cubic-bezier(.2,1.6,.4,1); }
+.mj-overlay span { padding: .6cqw 3cqw; border-radius: 1cqw; background: #000c; color: #ffe27a; font: 800 4cqw/1 Georgia, serif; }
+.mj-overlay small { color: #ffe9a8; font-size: 1.4cqw; }
+.mj-overlay.is-free-start { background: radial-gradient(circle, #a3262bee, #2a0508f2 70%); }
+@keyframes mj-pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mj-cell .mj-tile, .mj-overlay strong { animation: none !important; } }

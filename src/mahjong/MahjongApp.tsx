@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BOARD_HEIGHTS, CASCADE_MULTIPLIERS, FREE_CASCADE_MULTIPLIERS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, type Board, type Stops, type Token } from './engine/index.ts';
+import { BOARD_HEIGHTS, CASCADE_MULTIPLIERS, FREE_CASCADE_MULTIPLIERS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, type Board, type CascadeStep, type Stops, type Token } from './engine/index.ts';
 import { MahjongTile, SYMBOL_NAMES } from './MahjongTile.tsx';
+import { cascadeTimeline, type FramePhase } from './cascadeTimeline.ts';
 
 // Mahjong Cascade game page (/mahjong?token=…). The server decides every
 // result; this page only shows the boards it returns. STEP-28: tiles, board,
-// balance/bet/win, spin, rules. Cascade animation comes in STEP-29.
+// balance/bet/win, spin, rules; STEP-29 plays the server's cascade steps frame by
+// frame (cascadeTimeline), the multiplier bar, golden → wild, free spins and big wins.
 
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number } | null;
 type Session = { playerName: string; gameId: string; allowedBets?: number[]; credits: number; freeSpins: FreeSpins };
 type SpinResult = {
   roundId: string; mode: 'paid' | 'free'; bet: number; payout: number; credits: number | null;
-  initialBoard: Board; finalBoard: Board; cascadeSteps: readonly unknown[]; huCount: number;
+  initialBoard: Board; finalBoard: Board; cascadeSteps: readonly CascadeStep[]; huCount: number;
   freeSpinsAwarded: number; freeSpins: FreeSpins; freeSpinsFinished: { played: number; totalWin: number } | null; capped: boolean;
 };
 
@@ -18,8 +20,10 @@ type SpinResult = {
 export const MJ_STOP_INTERVAL_MS = 220;
 /** How long the reels spin before the first one stops (also covers a slow server). */
 export const MJ_FIRST_STOP_MS = 600;
-/** Pause on the first board before jumping to the final board of a cascade (STEP-29 animates this). */
-export const MJ_CASCADE_PAUSE_MS = 700;
+/** A round paying at least this many times the bet gets the big-win screen. */
+export const MJ_BIG_WIN_MULTIPLE = 20;
+export const MJ_OVERLAY_MS = 2400;
+type Overlay = { kind: 'free-start' | 'free-end' | 'big-win'; title: string; amount?: number } | null;
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const fmt = (n: number) => n.toLocaleString('zh-CN');
@@ -69,6 +73,12 @@ export default function MahjongApp() {
   const [message, setMessage] = useState('按"旋转"开始');
   const [freeSpins, setFreeSpins] = useState<FreeSpins>(null);
   const [rules, setRules] = useState(false);
+  const [phase, setPhase] = useState<FramePhase | null>(null);
+  const [frameCells, setFrameCells] = useState<ReadonlySet<string>>(new Set());
+  const [golden, setGolden] = useState<ReadonlySet<string>>(new Set());
+  const [multiplierIndex, setMultiplierIndex] = useState(-1);
+  const [overlay, setOverlay] = useState<Overlay>(null);
+  const overlayDone = useRef<() => void>(() => {});
   const busy = useRef(false);
   const [, force] = useState(0);
   const bets = session?.allowedBets ?? [];
@@ -89,7 +99,7 @@ export default function MahjongApp() {
     if (!session || busy.current) return;
     if (!inFree && credits < bet) { setMessage('余额不足，请回大厅充值'); return; }
     busy.current = true; force((n) => n + 1);
-    setWin(0); setMessage(inFree ? '免费旋转中…' : '旋转中…');
+    setWin(0); setMultiplierIndex(-1); setPhase(null); setMessage(inFree ? '免费旋转中…' : '旋转中…');
     if (!inFree) setCredits((c) => c - bet);
     setSpinningReels(BOARD_HEIGHTS.map(() => true));
     const started = performance.now();
@@ -101,8 +111,19 @@ export default function MahjongApp() {
         setSpinningReels((s) => s.map((v, i) => (i === reel ? false : v)));
         await new Promise((r) => setTimeout(r, MJ_STOP_INTERVAL_MS));
       }
-      if (result.cascadeSteps.length > 0) { await new Promise((r) => setTimeout(r, MJ_CASCADE_PAUSE_MS)); setBoard(result.finalBoard); }
+      // Play every recorded cascade step: winners light up, clear (golden tiles flip to wilds), the rest drop in.
+      for (const frame of cascadeTimeline(result.initialBoard, result.finalBoard, result.cascadeSteps)) {
+        setBoard(frame.board); setPhase(frame.phase === 'end' ? null : frame.phase);
+        setFrameCells(new Set(frame.cells)); setGolden(new Set(frame.golden));
+        if (frame.phase !== 'end') setMultiplierIndex(frame.multiplierIndex);
+        setWin(frame.runningWin);
+        if (frame.holdMs) await new Promise((r) => setTimeout(r, frame.holdMs));
+      }
       setWin(result.payout);
+      const showOverlay = (o: Overlay) => new Promise<void>((resolve) => { overlayDone.current = resolve; setOverlay(o); setTimeout(() => { setOverlay(null); resolve(); }, MJ_OVERLAY_MS); });
+      if (result.payout >= MJ_BIG_WIN_MULTIPLE * result.bet) await showOverlay({ kind: 'big-win', title: result.payout >= 100 * result.bet ? '超级大奖' : '大奖', amount: result.payout });
+      if (result.freeSpinsAwarded > 0) await showOverlay({ kind: 'free-start', title: `${result.huCount} 个"胡"！${result.mode === 'free' ? '追加' : '获得'} ${result.freeSpinsAwarded} 次免费旋转` });
+      if (result.freeSpinsFinished) await showOverlay({ kind: 'free-end', title: `免费旋转结束 · 共 ${result.freeSpinsFinished.played} 次`, amount: result.freeSpinsFinished.totalWin });
       if (result.credits !== null) setCredits(result.credits);
       setFreeSpins(result.freeSpins);
       if (result.freeSpinsFinished) setMessage(`免费旋转结束 · 共 ${result.freeSpinsFinished.played} 次 · 赢 ${fmt(result.freeSpinsFinished.totalWin)}`);
@@ -138,14 +159,19 @@ export default function MahjongApp() {
           <div><span>赢分</span><strong className="gold">{fmt(win)}</strong></div>
         </div>
         <button type="button" className="mj-icon" onClick={() => setRules(true)} aria-label="规则与赔付">i</button>
-        <p className="mj-demo">演示平台 · 仅虚拟积分 · 不涉及真实货币</p>
+        <p className="mj-demo">麻将连连胡 · 演示平台 · 仅虚拟积分 · 不涉及真实货币</p>
       </header>
-      <div className="mj-title">麻将连连胡</div>
+      <div className="mj-multipliers" aria-label="连消倍数">{(inFree || freeSpins ? FREE_CASCADE_MULTIPLIERS : CASCADE_MULTIPLIERS).map((m, i) => <span key={m} className={i === multiplierIndex ? 'is-active' : i < multiplierIndex ? 'is-passed' : ''}>×{m}</span>)}</div>
       <div className="mj-board" aria-label="盘面">
         {board.map((column, x) => <div key={x} className={`mj-col rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''}`}>
           {spinningReels[x]
             ? <div className="mj-strip">{filler[x].map((t, i) => <div className="mj-cell" key={i}><MahjongTile token={t} /></div>)}</div>
-            : column.map((t, y) => <div className="mj-cell" key={`${y}-${t.symbolId}-${t.golden ? 'g' : ''}`}><MahjongTile token={t} /></div>)}
+            : column.map((t, y) => {
+              const k = `${x}-${y}`;
+              const flip = phase === 'clear' && golden.has(k);
+              const cls = phase === 'win' ? (frameCells.has(k) ? 'is-win' : 'is-dim') : phase === 'clear' ? (flip ? 'is-flip' : frameCells.has(k) ? 'is-clear' : '') : phase === 'drop' && frameCells.has(k) ? 'is-drop' : '';
+              return <div className={`mj-cell ${cls}`} key={`${y}-${t.symbolId}-${t.golden ? 'g' : ''}-${phase === 'drop' ? 'd' : ''}`}><MahjongTile token={flip ? { symbolId: 'WILD' } : t} /></div>;
+            })}
         </div>)}
       </div>
       <footer className="mj-bar">
@@ -156,6 +182,7 @@ export default function MahjongApp() {
         <button type="button" className={`mj-spin ${inFree ? 'is-free' : ''}`} disabled={!canSpin} onClick={spin}>{spinning ? '…' : inFree ? `免费 ${freeSpins!.remaining}` : '旋转'}</button>
       </footer>
       {error && <div className="toast is-blocking" role="alert">{error} <a href="/">返回大厅</a></div>}
+      {overlay && <button type="button" className={`mj-overlay is-${overlay.kind}`} onClick={() => { setOverlay(null); overlayDone.current(); }}><strong>{overlay.title}</strong>{overlay.amount !== undefined && <span>{fmt(overlay.amount)}</span>}<small>点一下继续</small></button>}
       {rules && <RulesModal bet={bet} onClose={() => setRules(false)} />}
     </section>
   </main>;
