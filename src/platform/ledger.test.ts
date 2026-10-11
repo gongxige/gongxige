@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { openPlatformDatabase } from '../../server/platform/db.mjs';
-import { LedgerError, approveDeposit, approveWithdrawal, createDepositRequest, createPlayer, createWithdrawalRequest, getWallet, placeBet, reconcilePlayer } from '../../server/platform/ledger.mjs';
+import { LedgerError, approveDeposit, approveWithdrawal, createDepositRequest, createPlayer, createWithdrawalRequest, getWallet, placeBet, reconcilePlayer, refundBet } from '../../server/platform/ledger.mjs';
 
 const tempDirectories: string[] = [];
 
@@ -52,6 +52,19 @@ describe('平台账本', () => {
     assert.equal(placeBet(db, { playerId: player.id, transactionId: 'round-1-bet', amount: 25 }).idempotent, true);
     assert.equal(getWallet(db, player.id).balance, 75);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE transaction_id = 'round-1-bet'").get().count, 1);
+    db.close();
+  });
+
+  it('回滚退回原扣款，并作废迟到的扣款交易号', () => {
+    const db = testDatabase();
+    const player = fundedPlayer(db, 100);
+    placeBet(db, { playerId: player.id, transactionId: 'paid-bet', amount: 25, roundId: 'round-paid' });
+    refundBet(db, { playerId: player.id, transactionId: 'paid-refund', refTransactionId: 'paid-bet', roundId: 'round-paid' });
+    assert.equal(getWallet(db, player.id).balance, 100);
+    assert.equal(refundBet(db, { playerId: player.id, transactionId: 'paid-refund', refTransactionId: 'paid-bet' }).idempotent, true);
+    refundBet(db, { playerId: player.id, transactionId: 'late-refund', refTransactionId: 'late-bet', roundId: 'round-late' });
+    assert.equal(placeBet(db, { playerId: player.id, transactionId: 'late-bet', amount: 25 }).idempotent, true);
+    assert.equal(db.prepare("SELECT status FROM provider_transactions WHERE transaction_id = 'late-bet'").get().status, 'cancelled');
     db.close();
   });
 

@@ -1,4 +1,4 @@
-// End-to-end check of the provider setup: starts a mock operator and the game
+// End-to-end check of the provider setup: starts the platform service and the game
 // server on spare ports with a throw-away data folder, plays real rounds
 // through the HTTP APIs and checks that the money always adds up — also when
 // the operator's wallet fails. Usage: npm run check:provider [-- <spins>]
@@ -10,13 +10,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sign, signedPost } from '../server/http.mjs';
 
-const SPINS = Number(process.argv[2] ?? 300);
-const OP_PORT = 8898;
-const API_PORT = 8897;
+const SPINS = Number(process.argv[2] ?? 10);
+// A per-process port pair makes repeated checks independent from a previous
+// interrupted run whose child processes are still shutting down.
+const OP_PORT = 18_000 + (process.pid % 1_000) * 2;
+const API_PORT = OP_PORT + 1;
 const OP = `http://127.0.0.1:${OP_PORT}`;
 const API = `http://127.0.0.1:${API_PORT}`;
-const env = { ...process.env, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json' };
-const children = [spawn(process.execPath, ['mock-operator.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
+const env = { ...process.env, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', SLOW_BET_MS: '3500' };
+const children = [spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
 process.on('exit', () => children.forEach((c) => c.kill()));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,11 +30,13 @@ const step = (text) => console.log(`✓ ${text}`);
 
 for (let i = 0; i < 50; i += 1) { if ((await getJson(`${API}/api/health`).catch(() => null))?.status === 200 && (await getJson(`${OP}/health`).catch(() => null))?.status === 200) break; await sleep(200); }
 
-// Launch: the operator asks the game server for a session (signed).
-const launched = await signedPost(`${API}/provider/launch`, { playerId: 'player-002', playerName: '玩家二' }, { secret: 'local-demo-secret', operatorId: 'demo-operator' });
-assert.equal(launched.status, 200);
-const token = launched.body.token;
-assert.ok(launched.body.gameUrl.includes(token));
+// Launch: the platform signs and calls the game server, then redirects the player.
+const launched = await fetch(`${OP}/launch?player=player-002`, { redirect: 'manual' });
+assert.equal(launched.status, 302);
+const gameUrl = launched.headers.get('location');
+assert.ok(gameUrl?.includes('token='));
+const token = new URL(gameUrl).searchParams.get('token');
+assert.ok(token);
 const forged = await signedPost(`${API}/provider/launch`, { playerId: 'player-002' }, { secret: 'wrong-secret', operatorId: 'demo-operator' });
 assert.equal(forged.status, 401);
 assert.equal((await spinOnce('not-a-token', 80)).status, 401);
@@ -105,7 +109,7 @@ await setFault('slow-bet');
 const slow = await spinOnce(token, 80);
 assert.equal(slow.status, 502);
 assert.equal(slow.body.code, 'BET_UNCONFIRMED');
-await sleep(4000); // let the late answer arrive; it must not change anything
+await sleep(1200); // let the late answer arrive; it must not change anything
 s = await opState();
 assert.equal(s.players['player-002'].balance, beforeSlow);
 assert.ok(s.players['player-002'].ok);

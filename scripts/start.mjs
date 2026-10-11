@@ -1,4 +1,4 @@
-// npm start: run the mock operator (platform lobby + wallet), the game server
+// npm start: run the platform wallet service, the game server
 // (API) and the web dev server together in one terminal.
 // Anything already running on their ports is reused when it is up to date,
 // so starting twice is harmless. Ctrl+C stops what this script started.
@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { ENGINE_VERSION } from '../src/engine/index.ts';
 
-const PROTOCOL = 'provider-v1'; // SERVER_PROTOCOL in server.mjs / OPERATOR_PROTOCOL in mock-operator.mjs
+const PROTOCOL = 'provider-v1'; // SERVER_PROTOCOL in server.mjs / PLATFORM_PROTOCOL in platform-server.mjs
 const API_PORT = Number(process.env.API_PORT ?? 8787);
 const OPERATOR_PORT = Number(process.env.OPERATOR_PORT ?? 8788);
 const LOBBY_URL = `http://127.0.0.1:${OPERATOR_PORT}`;
@@ -47,10 +47,10 @@ process.on('SIGTERM', stopAll);
 
 const stopCommand = (port) => `      Stop-Process -Id (Get-NetTCPConnection -LocalPort ${port} -State Listen).OwningProcess`;
 
-// Mock operator (platform)
+// Platform wallet service
 const platform = await get(`${LOBBY_URL}/health`);
 if (!platform) {
-  run('平台', ['mock-operator.mjs']);
+  run('平台', ['platform-server.mjs']);
 } else {
   const { protocol } = await platform.json().catch(() => ({}));
   if (protocol === PROTOCOL) {

@@ -156,6 +156,39 @@ export function creditWin(db, { playerId, transactionId, amount, roundId = null 
   });
 }
 
+/**
+ * Reverse one provider bet.  If the bet has not arrived yet, reserve its
+ * transaction ID as cancelled so a delayed retry cannot charge the player.
+ */
+export function refundBet(db, { playerId, transactionId, refTransactionId, roundId = null }) {
+  if (!transactionId || !refTransactionId) throw new LedgerError('INVALID_TRANSACTION', '交易号不能为空');
+  return inTransaction(db, () => {
+    const duplicate = db.prepare('SELECT transaction_id FROM provider_transactions WHERE transaction_id = ?').get(transactionId);
+    if (duplicate) return { idempotent: true, ...getWallet(db, playerId) };
+
+    wallet(db, playerId);
+    const bet = db.prepare('SELECT * FROM provider_transactions WHERE transaction_id = ?').get(refTransactionId);
+    let amount = 0;
+    if (!bet) {
+      db.prepare(`INSERT INTO provider_transactions (
+        transaction_id, operation, player_id, round_id, status, ledger_entry_id,
+        ref_transaction_id, request_hash, created_at, updated_at
+      ) VALUES (?, 'bet', ?, ?, 'cancelled', NULL, NULL, NULL, ?, ?)`)
+        .run(refTransactionId, playerId, roundId, now(), now());
+    } else if (bet.operation === 'bet' && bet.status === 'completed') {
+      const entry = db.prepare('SELECT amount FROM ledger_entries WHERE transaction_id = ?').get(refTransactionId);
+      amount = entry?.amount ?? 0;
+      changeWallet(db, playerId, amount, 0);
+      db.prepare("UPDATE ledger_entries SET status = 'refunded' WHERE transaction_id = ?").run(refTransactionId);
+      db.prepare("UPDATE provider_transactions SET status = 'cancelled', updated_at = ? WHERE transaction_id = ?")
+        .run(now(), refTransactionId);
+    }
+    addLedgerEntry(db, { playerId, transactionId, kind: 'refund', amount, balanceDelta: amount, frozenDelta: 0, roundId, refTransactionId });
+    recordProviderTransaction(db, { transactionId, operation: 'refund', playerId, roundId, refTransactionId });
+    return { idempotent: false, ...getWallet(db, playerId) };
+  });
+}
+
 export function reconcilePlayer(db, playerId) {
   const actual = getWallet(db, playerId);
   const totals = db.prepare(`SELECT COALESCE(SUM(balance_delta), 0) AS balance, COALESCE(SUM(frozen_delta), 0) AS frozen
