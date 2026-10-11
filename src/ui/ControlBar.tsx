@@ -2,13 +2,14 @@ import { useState } from 'react';
 
 type Props = {
   bet: number; bets: readonly number[]; onBetChange: (bet: number) => void; betLocked: boolean;
-  winDisplay: number | null; message: string; spinning: boolean; freeSpins: boolean; winning: boolean; spinDisabled: boolean;
+  winDisplay: number | null; message: string; spinning: boolean; celebrating: boolean; freeSpins: boolean; winning: boolean; spinDisabled: boolean;
   autoRemaining: number | null; onRules: () => void; onMax: () => void; onAuto: (count?: number) => void;
   onSpinHoldStart: () => void; onSpinHoldEnd: () => void; onSpin: () => void;
 };
 
 export function ControlBar(props: Props) {
-  const { bet, bets, onBetChange, betLocked, winDisplay, message, spinning, freeSpins, winning, spinDisabled, autoRemaining, onRules, onMax, onAuto, onSpinHoldStart, onSpinHoldEnd, onSpin } = props;
+  const { bet, bets, onBetChange, betLocked, winDisplay, message, spinning, celebrating, freeSpins, winning, spinDisabled, autoRemaining, onRules, onMax, onAuto, onSpinHoldStart, onSpinHoldEnd, onSpin } = props;
+  const canStop = spinning || autoRemaining !== null || celebrating;
   const [autoOpen, setAutoOpen] = useState(false);
   const index = bets.indexOf(bet);
   return <footer className="control-bar">
@@ -26,8 +27,8 @@ export function ControlBar(props: Props) {
       <button type="button" className={`utility-button auto-button ${autoRemaining !== null ? 'is-active' : ''}`} onClick={() => autoRemaining !== null ? onAuto() : setAutoOpen((open) => !open)}>{autoRemaining === null ? '自动' : `剩余 ${autoRemaining}`}</button>
       {autoOpen && <div className="auto-menu" role="menu">{[10, 25, 50, 100].map((count) => <button key={count} type="button" onClick={() => { setAutoOpen(false); onAuto(count); }}>{count} 次</button>)}</div>}
     </div>
-    <button type="button" className={`spin-button ${winning ? 'is-win' : ''} ${spinning || autoRemaining !== null ? 'is-spinning' : ''} ${freeSpins ? 'is-free' : ''}`} onPointerDown={onSpinHoldStart} onPointerUp={onSpinHoldEnd} onPointerCancel={onSpinHoldEnd} onPointerLeave={onSpinHoldEnd} onClick={onSpin} disabled={spinDisabled}>
-      <span>{spinning || autoRemaining !== null ? 'STOP' : freeSpins ? '免费' : 'SPIN'}</span><small>{spinning || autoRemaining !== null ? '停止自动旋转' : '长按自动旋转'}</small>
+    <button type="button" className={`spin-button ${winning ? 'is-win' : ''} ${canStop ? 'is-spinning' : ''} ${freeSpins ? 'is-free' : ''}`} onPointerDown={celebrating ? undefined : onSpinHoldStart} onPointerUp={celebrating ? undefined : onSpinHoldEnd} onPointerCancel={celebrating ? undefined : onSpinHoldEnd} onPointerLeave={celebrating ? undefined : onSpinHoldEnd} onClick={onSpin} disabled={spinDisabled && !celebrating}>
+      <span>{canStop ? 'STOP' : freeSpins ? '免费' : 'SPIN'}</span><small>{celebrating ? '跳过大奖动画' : spinning || autoRemaining !== null ? '停止自动旋转' : '长按自动旋转'}</small>
     </button>
   </footer>;
 }

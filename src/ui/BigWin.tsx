@@ -21,8 +21,8 @@ type Props = { amount: number; bet: number; onDone: () => void };
 
 /**
  * Full-screen celebration. The number counts up from zero and the title
- * climbs through the tiers as it passes each threshold. Click once to jump
- * to the final amount, again to close.
+ * climbs through the tiers as it passes each threshold. A click skips the
+ * presentation; settlement has already happened before this visual mounts.
  */
 export function BigWin({ amount, bet, onDone }: Props) {
   const finalTier = bigWinTier(amount, bet) ?? BIG_WIN_TIERS[0];
@@ -54,7 +54,7 @@ export function BigWin({ amount, bet, onDone }: Props) {
   }, [counting, onDone]);
 
   const tier = bigWinTier(value, bet) ?? BIG_WIN_TIERS[0];
-  const click = () => { if (counting) skip.current = true; else onDone(); };
+  const click = () => { skip.current = true; onDone(); };
 
   return (
     <button type="button" className={`big-win-overlay tier-${tier.key}`} onClick={click} aria-label={`${tier.label} ${amount}`}>
@@ -65,7 +65,7 @@ export function BigWin({ amount, bet, onDone }: Props) {
           <strong>{tier.title}</strong>
           <span>{tier.label}</span>
         </div>
-        <div className={`big-win-amount ${counting ? '' : 'is-final'}`}>{value.toLocaleString('zh-CN')}</div>
+        <div className="big-win-number-strip"><div className={`big-win-amount ${counting ? '' : 'is-final'}`}>{value.toLocaleString('zh-CN')}</div></div>
         <div className="big-win-hint">{counting ? '点击跳过' : '点击继续'}</div>
       </div>
     </button>
