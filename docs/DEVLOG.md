@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-11 · STEP-01 阶段 6 收尾验证
+
+**做了什么**：亲自运行阶段 6 的构建、单元测试和供应商端到端检查；三项均通过，因此未修改任何功能代码。
+
+**怎么验证的**：`npm run build` 成功完成 TypeScript 检查与 Vite 生产构建；`npm test` 为 33/33 通过；`npm run check:provider` 通过启动签名/会话、钱包签名与去重回滚、300 局连续对账、逐局回放与流水校验。
+
+**遗留问题**：无。
+
+---
+
 ## 2026-10-11 · 自动接力：修好 Codex 运行环境，环境错误不再空耗重试
 
 **问题**：STEP-01 连续 4 次被打回，原因不是代码，而是 Codex 在 Windows 上一条命令都执行不了（`Failed to create unified exec process: helper_unknown_error: setup refresh had errors`）。

@@ -115,6 +115,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 需求见 [PLATFORM_TASK.md](PLATFORM_TASK.md)。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-01 ~ STEP-11 由 `npm run autopilot` 自动开发：Codex 写代码，Claude Code 审计，通过才进入下一步。进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
 - [x] 自动接力流程：`scripts/autopilot.mjs`、`AGENTS.md`（Codex 规则）、`docs/workflow/AUDITOR.md`（审计规则）
+- [x] STEP-01 阶段 6 收尾：已实际运行 `npm run build`、`npm test`、`npm run check:provider`，三项均通过；无需修改阶段 6 代码（2026-10-11）
 
 ## 四、重要决定记录
 
