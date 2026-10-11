@@ -20,9 +20,12 @@
 //   AUTOPILOT_CODEX_ARGS    传给 codex 的全部参数（设置后上一项无效）
 //   AUTOPILOT_MAX_ATTEMPTS  同一步最多尝试几次（默认 4）
 //   AUTOPILOT_ONLY_STEP     只跑到这一步为止（例如 STEP-03），方便先试一两步
+//   AUTOPILOT_DEV=manual    人工开发模式：不调用 Codex，由人（或 Claude Code 会话）先写好代码并提交，
+//                           把总结写进 .autopilot/manual-summary.md，再运行脚本只做审计；
+//                           不通过就停下等人修改，不自动重试
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, createWriteStream } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, createWriteStream, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 const PLAN = 'docs/WORKFLOW_PLAN.md';
@@ -36,6 +39,8 @@ const ONLY_STEP = process.env.AUTOPILOT_ONLY_STEP ?? null;
 const CODEX = process.env.AUTOPILOT_CODEX ?? 'codex';
 const CLAUDE = process.env.AUTOPILOT_CLAUDE ?? 'claude';
 const CODEX_LAST = `${WORK}/codex-last.txt`;
+const MANUAL = process.env.AUTOPILOT_DEV === 'manual';
+const MANUAL_SUMMARY = `${WORK}/manual-summary.md`;
 // Codex's Windows sandbox cannot start processes on some machines ("helper_unknown_error: setup refresh
 // had errors"), so on Windows Codex runs without its sandbox; AGENTS.md limits what it may do.
 const CODEX_SANDBOX = process.env.AUTOPILOT_CODEX_SANDBOX ?? (process.platform === 'win32' ? 'danger-full-access' : 'workspace-write');
@@ -222,37 +227,50 @@ async function main() {
       state.attempts[step.id] = attempt;
       saveState(state);
 
-      // 1. Codex
-      say(`${step.id} 第 ${attempt} 次：Codex 开始写代码…（日志 ${WORK}/logs/${step.id}-${attempt}-codex.log）`);
-      if (existsSync(CODEX_LAST)) writeFileSync(CODEX_LAST, '');
-      const codexLog = `${WORK}/logs/${step.id}-${attempt}-codex.log`;
-      const prompt = codexPrompt(step, attempt, lastAudit);
-      const codex = await run(CODEX, CODEX_ARGS, prompt, codexLog, 3 * HOURS);
-      const summary = existsSync(CODEX_LAST) ? readFileSync(CODEX_LAST, 'utf8').trim() : '';
-      // Codex could not run commands: stop without committing, auditing or using up an attempt.
-      const problem = codexEnvProblem(codex.output, prompt);
-      if (problem === 'quota') {
-        // Keep whatever Codex finished before the limit; the next run continues this same attempt.
-        state.attempts[step.id] = attempt - 1;
-        saveState(state);
-        const retryAt = String(codex.output).match(/try again at ([^.\r\n]+?)\.?\s*$/m)?.[1] ?? '稍后';
-        writeFileSync(BLOCKED, `# 自动开发暂停：Codex 用量额度用完\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 提示用量额度已用完（可在 ${retryAt} 后重试）。这不是代码问题，没有审计，也不计入尝试次数；Codex 已写的部分改动已单独提交，下次接着做。\n\n- Codex 日志：${codexLog}\n- 处理办法：等额度恢复后删除本文件，再运行 npm run autopilot。\n`);
-        commitAll(`wip: ${step.id} 第${attempt}次（未完成，Codex 用量额度用完）\n\n[autopilot] 未审计，下次运行继续这一次尝试`);
-        say(`Codex 用量额度用完（${retryAt} 后可重试），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
-        return 3;
+      // 1. Codex (or, in manual mode, the summary of work someone already did and committed)
+      let summary = '';
+      if (MANUAL) {
+        if (!existsSync(MANUAL_SUMMARY)) {
+          state.attempts[step.id] = attempt - 1;
+          saveState(state);
+          say(`人工开发模式：请先完成 ${step.id}，把总结写进 ${MANUAL_SUMMARY}，再运行。`);
+          return 4;
+        }
+        summary = readFileSync(MANUAL_SUMMARY, 'utf8').trim();
+        unlinkSync(MANUAL_SUMMARY);
+        say(`${step.id} 第 ${attempt} 次：人工开发模式，不调用 Codex，直接审计。`);
+      } else {
+        say(`${step.id} 第 ${attempt} 次：Codex 开始写代码…（日志 ${WORK}/logs/${step.id}-${attempt}-codex.log）`);
+        if (existsSync(CODEX_LAST)) writeFileSync(CODEX_LAST, '');
+        const codexLog = `${WORK}/logs/${step.id}-${attempt}-codex.log`;
+        const prompt = codexPrompt(step, attempt, lastAudit);
+        const codex = await run(CODEX, CODEX_ARGS, prompt, codexLog, 3 * HOURS);
+        summary = existsSync(CODEX_LAST) ? readFileSync(CODEX_LAST, 'utf8').trim() : '';
+        // Codex could not run commands: stop without committing, auditing or using up an attempt.
+        const problem = codexEnvProblem(codex.output, prompt);
+        if (problem === 'quota') {
+          // Keep whatever Codex finished before the limit; the next run continues this same attempt.
+          state.attempts[step.id] = attempt - 1;
+          saveState(state);
+          const retryAt = String(codex.output).match(/try again at ([^.\r\n]+?)\.?\s*$/m)?.[1] ?? '稍后';
+          writeFileSync(BLOCKED, `# 自动开发暂停：Codex 用量额度用完\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 提示用量额度已用完（可在 ${retryAt} 后重试）。这不是代码问题，没有审计，也不计入尝试次数；Codex 已写的部分改动已单独提交，下次接着做。\n\n- Codex 日志：${codexLog}\n- 处理办法：等额度恢复后删除本文件，再运行 npm run autopilot。\n`);
+          commitAll(`wip: ${step.id} 第${attempt}次（未完成，Codex 用量额度用完）\n\n[autopilot] 未审计，下次运行继续这一次尝试`);
+          say(`Codex 用量额度用完（${retryAt} 后可重试），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
+          return 3;
+        }
+        if (problem === 'exec') {
+          state.attempts[step.id] = attempt - 1;
+          saveState(state);
+          writeFileSync(BLOCKED, `# 自动开发卡住了：Codex 运行环境出错\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 无法执行任何命令（日志里出现 helper_unknown_error / Failed to create unified exec process）。这是 Codex 运行环境的问题，不是代码问题，所以没有提交、没有审计，也不计入尝试次数。\n\n- Codex 日志：${codexLog}\n- 常见解决办法：在 %USERPROFILE%\\.codex\\config.toml 的 [windows] 段设置 sandbox = "unelevated"，关闭所有 Codex 进程后重试；可以先用 codex exec --sandbox read-only "运行 git status" 确认 Codex 能执行命令。\n- 处理完后：删除本文件，再运行 npm run autopilot。\n`);
+          say(`Codex 运行环境出错（helper_unknown_error），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
+          return 3;
+        }
+        if (codex.code !== 0) say(`Codex 退出代码 ${codex.code}（仍然提交现有改动并交给审计判断）。`);
       }
-      if (problem === 'exec') {
-        state.attempts[step.id] = attempt - 1;
-        saveState(state);
-        writeFileSync(BLOCKED, `# 自动开发卡住了：Codex 运行环境出错\n\n时间：${now()}\n\n${step.id} ${step.title} 第 ${attempt} 次：Codex 无法执行任何命令（日志里出现 helper_unknown_error / Failed to create unified exec process）。这是 Codex 运行环境的问题，不是代码问题，所以没有提交、没有审计，也不计入尝试次数。\n\n- Codex 日志：${codexLog}\n- 常见解决办法：在 %USERPROFILE%\\.codex\\config.toml 的 [windows] 段设置 sandbox = "unelevated"，关闭所有 Codex 进程后重试；可以先用 codex exec --sandbox read-only "运行 git status" 确认 Codex 能执行命令。\n- 处理完后：删除本文件，再运行 npm run autopilot。\n`);
-        say(`Codex 运行环境出错（helper_unknown_error），已停下，没有消耗尝试次数。详情见 ${BLOCKED}。`);
-        return 3;
-      }
-      if (codex.code !== 0) say(`Codex 退出代码 ${codex.code}（仍然提交现有改动并交给审计判断）。`);
 
       // 2. Commit Codex's work
       const firstLine = (summary.split('\n').find((l) => l.trim()) ?? '（无总结）').replace(/^#+\s*/, '').slice(0, 72);
-      const codeCommit = commitAll(`${step.id} 第${attempt}次: ${step.title}\n\n${summary.slice(0, 4000) || firstLine}\n\n[autopilot] 由 Codex 编写，等待 Claude Code 审计`);
+      const codeCommit = commitAll(`${step.id} 第${attempt}次: ${step.title}\n\n${summary.slice(0, 4000) || firstLine}\n\n[autopilot] 由 ${MANUAL ? 'Claude Code（人工开发模式）' : 'Codex'} 编写，等待 Claude Code 审计`);
       say(`已提交 ${codeCommit}。Claude Code 开始审计…`);
 
       // 3. Claude Code audit (read-only); one retry if the report has no verdict line
@@ -277,6 +295,7 @@ async function main() {
       }
       saveState(state);
       commitAll(`audit: ${step.id} 第${attempt}次 不通过，打回重做`);
+      if (MANUAL) { say(`❌ ${step.id} 审计不通过，报告见 ${reportPath}。人工开发模式不自动重试：修改并写好总结后再运行。`); return 4; }
       say(`❌ ${step.id} 审计不通过，带着报告打回给 Codex。`);
       lastAudit = readFileSync(reportPath, 'utf8');
     }
