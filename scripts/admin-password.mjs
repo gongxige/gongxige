@@ -11,7 +11,9 @@ import { ensureInitialAdmin } from '../server/platform/admin.mjs';
 const file = join(process.env.DATA_DIR ?? join(process.cwd(), 'data'), process.env.PLATFORM_DB_FILE ?? 'platform.sqlite');
 const db = openPlatformDatabase(file);
 const password = randomBytes(12).toString('base64url');
-if (!await ensureInitialAdmin(db, { password })) {
+const hasAdmin = db.prepare('SELECT COUNT(*) AS count FROM admins').get().count > 0;
+if (!hasAdmin) await ensureInitialAdmin(db, { password });
+else {
   const credentials = await hashPassword(password);
   db.prepare('UPDATE admins SET password_hash = ?, password_salt = ?, failed_login_count = 0, login_locked_until = NULL, updated_at = ? WHERE username = ?')
     .run(credentials.hash, credentials.salt, new Date().toISOString(), 'admin');
