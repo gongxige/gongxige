@@ -56,6 +56,21 @@ describe('玩家认证接口', () => {
     assert.equal((await request('/auth/me', { headers: { cookie: login.cookie! } })).status, 401);
   });
 
+  it('拒绝超出可用余额的提现，并且冻结金额不能下注', async () => {
+    await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'walletuser', password: 'secure-pass-5' }) });
+    const login = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username: 'walletuser', password: 'secure-pass-5' }) });
+    assert.equal(login.status, 200);
+    assert.equal((await request('/api/withdrawal-requests', { method: 'POST', headers: { cookie: login.cookie! }, body: JSON.stringify({ amount: 10_001 }) })).status, 400);
+    const freeze = await request('/api/withdrawal-requests', { method: 'POST', headers: { cookie: login.cookie! }, body: JSON.stringify({ amount: 9_980 }) });
+    assert.equal(freeze.status, 201);
+    const wallet = await request('/api/wallet', { headers: { cookie: login.cookie! } });
+    assert.deepEqual({ balance: wallet.body.balance, frozen: wallet.body.frozen_balance }, { balance: 20, frozen: 9_980 });
+    const payload = JSON.stringify({ playerId: wallet.body.playerId, transactionId: 'frozen-funds-bet', roundId: 'wallet-round', amount: 21 });
+    const bet = await request('/wallet/bet', { method: 'POST', headers: { 'x-operator-id': 'demo-operator', 'x-signature': sign(payload, 'local-demo-secret') }, body: payload });
+    assert.equal(bet.status, 402);
+    assert.equal(bet.body.code, 'INSUFFICIENT_FUNDS');
+  });
+
   it('未登录不能读取受保护接口，冻结账号不能登录或下注', async () => {
     assert.equal((await request('/auth/me')).status, 401);
     await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'frozenuser', password: 'secure-pass-3' }) });

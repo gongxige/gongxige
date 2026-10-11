@@ -1,10 +1,11 @@
 // Local demo platform. It owns virtual-credit wallets and exposes the
 // provider-v1 wallet contract used by server.mjs. No real-money features.
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { json, html, parseJson, readRaw, signedPost, verify } from './server/http.mjs';
 import { openPlatformDatabase } from './server/platform/db.mjs';
-import { LedgerError, createDepositRequest, createPlayer, approveDeposit, creditWin, getWallet, placeBet, reconcilePlayer, refundBet } from './server/platform/ledger.mjs';
+import { LedgerError, createDepositRequest, createPlayer, approveDeposit, createWithdrawalRequest, creditWin, getWallet, placeBet, reconcilePlayer, refundBet } from './server/platform/ledger.mjs';
 import { authenticatePlayer, changePassword, createSessionStore, registerPlayer } from './server/platform/auth.mjs';
 
 export const PLATFORM_PROTOCOL = 'provider-v1';
@@ -37,6 +38,18 @@ const clearSessionCookie = (res) => res.setHeader('set-cookie', 'platform_sessio
 function currentPlayer(req) {
   const id = sessions.get(cookieValue(req, 'platform_session'));
   return id ? db.prepare('SELECT id, username, status FROM players WHERE id = ?').get(id) : null;
+}
+
+function walletRecords(playerId) {
+  const requests = db.prepare(`SELECT 'deposit' AS kind, amount, status, created_at AS createdAt
+    FROM deposit_requests WHERE player_id = ?
+    UNION ALL
+    SELECT 'withdrawal' AS kind, amount, status, created_at AS createdAt
+    FROM withdrawal_requests WHERE player_id = ?`).all(playerId, playerId);
+  const entries = db.prepare(`SELECT kind, amount, status, created_at AS createdAt
+    FROM ledger_entries WHERE player_id = ?
+      AND kind IN ('bet', 'win', 'refund')`).all(playerId);
+  return [...requests, ...entries].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 function walletResponse(res, action, input) {
@@ -141,6 +154,30 @@ const server = createServer(async (req, res) => {
       const player = currentPlayer(req);
       if (!player) return fail(res, 401, 'UNAUTHENTICATED', 'Please log in');
       return json(res, 200, { playerId: player.id, balance: getWallet(db, player.id).balance, currency: 'DEMO' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/wallet') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      return json(res, 200, { playerId: player.id, ...getWallet(db, player.id), currency: 'DEMO' });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/wallet/records') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      return json(res, 200, { records: walletRecords(player.id) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/deposit-requests') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      const { amount } = parseJson(await readRaw(req));
+      const request = createDepositRequest(db, { playerId: player.id, requestNo: `deposit-${randomUUID()}`, amount });
+      return json(res, 201, { request });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/withdrawal-requests') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      const { amount } = parseJson(await readRaw(req));
+      const request = createWithdrawalRequest(db, { playerId: player.id, requestNo: `withdrawal-${randomUUID()}`, amount });
+      return json(res, 201, { request });
     }
     if (req.method === 'POST' && url.pathname === '/games/wild-frontier/launch') {
       const player = currentPlayer(req);

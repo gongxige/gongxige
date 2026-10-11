@@ -2,8 +2,9 @@ import { FormEvent, useEffect, useState } from 'react';
 import GameApp from './GameApp.tsx';
 
 type Player = { id: string; username: string; status: string };
-type Wallet = { playerId: string; balance: number; currency: string };
-type View = 'login' | 'register' | 'lobby';
+type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
+type WalletRecord = { kind: string; amount: number; status: string; createdAt: string };
+type View = 'login' | 'register' | 'lobby' | 'wallet';
 
 class PlatformError extends Error {}
 
@@ -31,18 +32,30 @@ function AuthCard({ view, onSuccess, onSwitch }: { view: Exclude<View, 'lobby'>;
   return <main className="platform-page"><Notice /><section className="auth-card" aria-labelledby="auth-title"><p className="eyebrow">WILD FRONTIER</p><h1 id="auth-title">{isRegister ? '创建演示账号' : '欢迎回来'}</h1><p className="auth-copy">{isRegister ? '注册后登录，即可使用虚拟积分体验游戏。' : '登录后进入游戏大厅。'}</p><form onSubmit={submit}><label>用户名<input autoComplete="username" minLength={3} maxLength={32} value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label>密码<input type="password" autoComplete={isRegister ? 'new-password' : 'current-password'} minLength={8} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{isRegister && <label>确认密码<input type="password" autoComplete="new-password" minLength={8} maxLength={128} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}{message && <p className="form-message" role="status">{message}</p>}<button className="primary-button" disabled={busy}>{busy ? '处理中…' : isRegister ? '注册账号' : '登录大厅'}</button></form><button className="text-button" onClick={onSwitch}>{isRegister ? '已有账号？去登录' : '没有账号？注册演示账号'}</button></section></main>;
 }
 
-function Lobby({ player, onLogout }: { player: Player; onLogout: () => void }) {
+function Lobby({ player, onLogout, onWallet }: { player: Player; onLogout: () => void; onWallet: () => void }) {
   const [wallet, setWallet] = useState<Wallet | null>(null); const [message, setMessage] = useState(''); const [launching, setLaunching] = useState(false);
   useEffect(() => { platformFetch<Wallet>('/games/wild-frontier/balance').then(setWallet).catch((error: Error) => setMessage(error.message)); }, []);
   async function launch() { setLaunching(true); setMessage('正在连接 Wild Frontier…'); try { const { gameUrl } = await platformFetch<{ gameUrl: string }>('/games/wild-frontier/launch', { method: 'POST', body: '{}' }); location.assign(gameUrl); } catch (error) { setMessage(error instanceof Error ? error.message : '暂时无法启动游戏。'); setLaunching(false); } }
   async function logout() { await platformFetch('/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined); onLogout(); }
-  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO GAME LOBBY</p><h1>你好，{player.username}</h1></div><button className="text-button" onClick={logout}>退出登录</button></header><section className="wallet-panel" aria-label="虚拟积分余额"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>DEMO · 仅供本地演示</small></section><section className="games-section"><div><p className="eyebrow">游戏大厅</p><h2>选择一款游戏</h2></div><button className="game-card" onClick={launch} disabled={launching} aria-label="进入 Wild Frontier"><span className="game-card-art">♜</span><span className="game-card-body"><b>Wild Frontier</b><small>1024 Ways · 虚拟积分体验</small></span><span className="game-card-action">{launching ? '启动中…' : '进入游戏 →'}</span></button>{message && <p className="form-message" role="status">{message}</p>}</section></main>;
+  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO GAME LOBBY</p><h1>你好，{player.username}</h1></div><div className="header-actions"><button className="text-button" onClick={onWallet}>我的钱包</button><button className="text-button" onClick={logout}>退出登录</button></div></header><section className="wallet-panel" aria-label="虚拟积分余额"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>DEMO · 仅供本地演示</small></section><section className="games-section"><div><p className="eyebrow">游戏大厅</p><h2>选择一款游戏</h2></div><button className="game-card" onClick={launch} disabled={launching} aria-label="进入 Wild Frontier"><span className="game-card-art">♜</span><span className="game-card-body"><b>Wild Frontier</b><small>1024 Ways · 虚拟积分体验</small></span><span className="game-card-action">{launching ? '启动中…' : '进入游戏 →'}</span></button>{message && <p className="form-message" role="status">{message}</p>}</section></main>;
+}
+
+const kindLabel: Record<string, string> = { deposit: '充值申请', withdrawal: '提现申请', bet: '下注', win: '派彩', refund: '回滚' };
+const statusLabel: Record<string, string> = { pending: '待审核', approved: '已通过', rejected: '已拒绝', completed: '成功', refunded: '已回滚' };
+
+function WalletPage({ onBack }: { onBack: () => void }) {
+  const [wallet, setWallet] = useState<Wallet | null>(null); const [records, setRecords] = useState<WalletRecord[]>([]); const [amount, setAmount] = useState(''); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
+  async function load() { const [nextWallet, nextRecords] = await Promise.all([platformFetch<Wallet>('/api/wallet'), platformFetch<{ records: WalletRecord[] }>('/api/wallet/records')]); setWallet(nextWallet); setRecords(nextRecords.records); }
+  useEffect(() => { load().catch((error: Error) => setMessage(error.message)); }, []);
+  async function submit(kind: 'deposit' | 'withdrawal') { const nextAmount = Number(amount); setMessage(''); if (!Number.isSafeInteger(nextAmount) || nextAmount <= 0) { setMessage('请输入正整数虚拟积分。'); return; } setBusy(true); try { await platformFetch(`/api/${kind === 'deposit' ? 'deposit' : 'withdrawal'}-requests`, { method: 'POST', body: JSON.stringify({ amount: nextAmount }) }); setAmount(''); setMessage(kind === 'deposit' ? '充值申请已提交，等待演示审核。' : '提现申请已提交，对应虚拟积分已冻结。'); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : '请求失败。'); } finally { setBusy(false); } }
+  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO WALLET</p><h1>我的钱包</h1></div><button className="text-button" onClick={onBack}>返回大厅</button></header><section className="wallet-panel wallet-summary"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>冻结中：{wallet ? (wallet.frozen_balance ?? 0).toLocaleString('zh-CN') : '—'} DEMO</small></section><p className="wallet-notice">仅提交虚拟积分金额；本演示不收集银行卡、账户或任何真实收款信息。</p><section className="wallet-actions"><label>申请金额<input type="number" min="1" step="1" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={busy} /></label><div><button className="primary-button" disabled={busy} onClick={() => submit('deposit')}>提交充值申请</button><button className="secondary-button" disabled={busy} onClick={() => submit('withdrawal')}>提交提现申请</button></div></section>{message && <p className="form-message" role="status">{message}</p>}<section className="records-section"><h2>资金记录</h2><p>包含充值、提现、下注、派彩与回滚；每条均显示当前状态。</p><div className="records-list">{records.length ? records.map((record, index) => <article className="record" key={`${record.kind}-${record.createdAt}-${index}`}><b>{kindLabel[record.kind] ?? record.kind}</b><span>{record.amount.toLocaleString('zh-CN')} DEMO</span><em>{statusLabel[record.status] ?? record.status}</em><small>{new Date(record.createdAt).toLocaleString('zh-CN')}</small></article>) : <p>暂无资金记录。</p>}</div></section></main>;
 }
 
 export default function App() {
   const hasGameToken = new URLSearchParams(location.search).has('token'); const [player, setPlayer] = useState<Player | null>(null); const [view, setView] = useState<View>('login');
   useEffect(() => { if (!hasGameToken) platformFetch<{ player: Player }>('/auth/me').then(({ player: next }) => { setPlayer(next); setView('lobby'); }).catch(() => undefined); }, [hasGameToken]);
   if (hasGameToken) return <GameApp />;
-  if (view === 'lobby' && player) return <Lobby player={player} onLogout={() => { setPlayer(null); setView('login'); }} />;
+  if (view === 'wallet' && player) return <WalletPage onBack={() => setView('lobby')} />;
+  if (view === 'lobby' && player) return <Lobby player={player} onWallet={() => setView('wallet')} onLogout={() => { setPlayer(null); setView('login'); }} />;
   return <AuthCard view={view === 'register' ? 'register' : 'login'} onSuccess={(next) => { setPlayer(next); setView('lobby'); }} onSwitch={() => setView(view === 'login' ? 'register' : 'login')} />;
 }
