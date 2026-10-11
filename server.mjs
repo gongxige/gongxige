@@ -141,7 +141,8 @@ async function handleSession(session, res) {
     const body = await wallet(session.operatorId, 'balance', { playerId: session.playerId });
     remember(session, body.balance);
     save();
-    return json(res, 200, { playerName: session.playerName, gameId: session.gameId ?? 'wild-frontier', credits: body.balance, freeSpins: player.freeSpins });
+    const game = gameFor(session.gameId ?? 'wild-frontier');
+    return json(res, 200, { playerName: session.playerName, gameId: game.gameId, allowedBets: game.allowedBets, credits: body.balance, freeSpins: player.freeSpins });
   } catch (error) {
     return json(res, 502, { error: `读取平台余额失败：${error.message}` });
   }
