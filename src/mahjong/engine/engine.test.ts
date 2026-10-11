@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BOARD_HEIGHTS, boardFromStops, evaluateWays, freeSpinsForHu, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PayTable, type Token } from './index.ts';
+import { BOARD_HEIGHTS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, evaluateWays, freeSpinsForHu, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PayTable, type Token } from './index.ts';
 
 const token = (symbolId: Token['symbolId']): Token => ({ symbolId });
 const payTable: PayTable = { FA: { 3: 10 }, ZHONG: { 3: 20 } };
@@ -104,6 +104,22 @@ describe('麻将连连胡 STEP-25 特殊牌、免费旋转与封顶引擎', () =
       const stops = [next() % 9, next() % 9, next() % 9, next() % 9, next() % 9] as const;
       const original = settleSpin(stops, 2);
       assert.deepEqual(replaySpin(original.replayInput), original);
+    }
+  });
+
+  it('正式数学配置的支付保持整数且单个付费回合不超过 1,708 倍', () => {
+    let seed = 0x26_10_2026;
+    const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
+    for (let index = 0; index < 2_000; index += 1) {
+      let outcome = settleSpin([next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], 100, MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
+      let total = outcome.payout;
+      let remaining = outcome.freeSpinsAwarded;
+      while (remaining > 0 && !outcome.capped) {
+        const settled = settleFreeSpin({ bet: 100, remaining, parentTotalWin: total, capped: false }, [next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable);
+        outcome = settled.outcome; total += outcome.payout; remaining = settled.state?.remaining ?? 0;
+      }
+      assert.equal(Number.isInteger(total), true);
+      assert.ok(total <= 100 * MAX_WIN_MULTIPLIER);
     }
   });
 });
