@@ -4,5 +4,6 @@
     "STEP-01": 4
   },
   "limits": {},
-  "baseline": "074075405feb314cadc80452f8543f185e4eea33"
+  "baseline": "074075405feb314cadc80452f8543f185e4eea33",
+  "blocked": "STEP-01"
 }
