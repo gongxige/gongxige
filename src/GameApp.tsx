@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALLOWED_BETS, ENGINE_VERSION, type SymbolId, type Win } from './engine/index.ts';
 import { ReelBoard } from './ReelBoard.tsx';
 import { useReels } from './useReels.ts';
+import { useSymbolsReady } from './useSymbolsReady.ts';
 import { ControlBar } from './ui/ControlBar.tsx';
 import { RulesModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
@@ -109,6 +110,7 @@ function useCountUp(target: number, bet: number) {
 
 export default function GameApp() {
   const reels = useReels();
+  const symbols = useSymbolsReady();
   const [config, setConfig] = useState<Config | null>(null);
   const [credits, setCredits] = useState(0);
   const [bet, setBet] = useState<number>(ALLOWED_BETS[1]);
@@ -164,7 +166,7 @@ export default function GameApp() {
   const spin = (automatic = false) => {
     if (spinning) { if (!automatic) stopAuto('player-stopped'); reels.quickStop(); return; }
     if (!automatic && autoSpin.current.active) { stopAuto('player-stopped'); setMessage('自动旋转已停止'); return; }
-    if (!config || modal || overlay || celebrating || staleApi || noSession) return;
+    if (!config || !symbols.ready || modal || overlay || celebrating || staleApi || noSession) return;
     // Free spins use the bet they were won with and cost nothing.
     const spinBet = freeSpins ? freeSpins.bet : bet;
     if (!freeSpins && credits < bet) { stopAuto('insufficient-funds'); setInsufficientFunds(true); return; }
@@ -273,7 +275,7 @@ export default function GameApp() {
   const highlightKey = cycle ? cycle.cells.join(',') : '';
   useEffect(() => { reels.highlight(highlightKey ? highlightKey.split(',') : null); }, [highlightKey, reels.highlight]);
   // During free spins the button only works as "stop".
-  const spinDisabled = !config || staleApi || noSession || (!spinning && autoRemaining === null && (inFreeSpins || overlay !== null || celebrating || credits < bet));
+  const spinDisabled = !config || !symbols.ready || staleApi || noSession || (!spinning && autoRemaining === null && (inFreeSpins || overlay !== null || celebrating || credits < bet));
   const shownBet = freeSpins ? freeSpins.bet : bet;
   const freeMessage = freeSpins ? `免费游戏 · 剩余 ${freeSpins.remaining} 局 · 累计赢分 ${freeSpins.totalWin.toLocaleString('zh-CN')}` : '';
 
@@ -297,6 +299,7 @@ export default function GameApp() {
         </button>
       )}
       {roundId && <div className="round-id" title="把局号发给平台或客服，可以查到这一局的回放">局号<span>{roundId}</span></div>}
+      {!symbols.ready && <div className="loading-cover" role="status"><span>游戏加载中… {symbols.loaded} / {symbols.total}</span><i style={{ width: `${(symbols.loaded / symbols.total) * 100}%` }} /></div>}
       {staleApi && <div className="toast is-blocking" role="alert">{STALE_API_MESSAGE}</div>}
       {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href="/">打开平台大厅</a></div>}
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}

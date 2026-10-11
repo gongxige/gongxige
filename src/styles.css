@@ -290,3 +290,8 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
   .control-bar { padding-left: max(1cqw, env(safe-area-inset-top)); padding-right: max(1cqw, env(safe-area-inset-bottom)); }
   .modal-card { max-height: calc(100dvw - 32px); }
 }
+/* Loading cover: hides the reels until every symbol image is decoded (slow links leave blank cells otherwise). */
+.loading-cover { position: absolute; inset: 14.5% 0 0 0; z-index: 8; display: grid; place-content: center; justify-items: center; gap: 1.2cqw; background: #120a2ee6; color: #ffe9a8; font: 700 1.8cqw/1.2 system-ui, "Microsoft YaHei", sans-serif; }
+.loading-cover i { display: block; width: 0; height: .6cqw; min-width: 1cqw; max-width: 30cqw; border-radius: .3cqw; background: linear-gradient(90deg, #ffd36a, #ff9d00); box-shadow: 0 0 1cqw #ffb84a; transition: width .2s; }
+.loading-cover::before { content: ''; width: 30cqw; height: .6cqw; border-radius: .3cqw; background: #ffffff22; grid-row: 2; grid-column: 1; }
+.loading-cover i { grid-row: 2; grid-column: 1; justify-self: start; }

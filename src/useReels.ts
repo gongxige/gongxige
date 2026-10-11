@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { ALL_SYMBOLS, REEL_STRIPS, REELS, ROWS, SCATTER, type SymbolId } from './engine/index.ts';
+import { REEL_STRIPS, REELS, ROWS, SCATTER, type SymbolId } from './engine/index.ts';
 import { SpinController } from './game/spinController.ts';
 
 export const symbolSrc = (id: SymbolId) => `/reels/${id}.png`;
@@ -67,8 +67,7 @@ export function useReels() {
   useLayoutEffect(draw, [draw]);
 
   useEffect(() => {
-    // Preload every symbol so swapping images mid-spin never flashes.
-    ALL_SYMBOLS.forEach((id) => { new Image().src = symbolSrc(id); });
+    // Every symbol is preloaded by useSymbolsReady, so swapping images mid-spin never flashes.
     // Switch between animation frames and the timer when the tab is hidden or shown mid-spin.
     const onVisibility = () => {
       if (!controller.isSpinning) return;
