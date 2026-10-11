@@ -26,6 +26,9 @@ export class AutoSpinController {
 export const LONG_PRESS_MS = 600;
 export const isAutoSpinLongPress = (heldMs: number) => heldMs >= LONG_PRESS_MS;
 
+/** 付费自动旋转在请求下一局前保留中奖画面。 */
+export const AUTO_SPIN_DELAY_MS = { win: 2000, noWin: 280 } as const;
+
 export function highestAllowedBet(bets: readonly number[]): number {
   if (!bets.length) throw new Error('At least one bet is required');
   return Math.max(...bets);

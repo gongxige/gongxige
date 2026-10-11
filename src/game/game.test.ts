@@ -4,7 +4,7 @@ import { REEL_STRIPS, ROWS, SCATTER, gridFromStops, windowAt } from '../engine/i
 import { ACCEL_MS, MIN_STOP_DISTANCE, OVERSHOOT, ReelMotion, SPIN_SPEED } from './reelMotion.ts';
 import { ReelTape } from './reelTape.ts';
 import { ANTICIPATION_SLOW_MS, ANTICIPATION_SPIN_MS, FIRST_STOP_MS, STOP_INTERVAL_MS, SpinController } from './spinController.ts';
-import { AutoSpinController, highestAllowedBet, isAutoSpinLongPress, isBetChangeLocked, LONG_PRESS_MS, type AutoStopReason } from './autoSpin.ts';
+import { AUTO_SPIN_DELAY_MS, AutoSpinController, highestAllowedBet, isAutoSpinLongPress, isBetChangeLocked, LONG_PRESS_MS, type AutoStopReason } from './autoSpin.ts';
 
 /** Run the motion frame by frame (60fps) until it lands; returns every position seen. */
 function runUntilLanded(motion: ReelMotion, from: number): { positions: number[]; landedAt: number } {
@@ -220,6 +220,12 @@ describe('AutoSpinController', () => {
   it('recognises a 0.6 second SPIN hold as automatic play', () => {
     assert.equal(isAutoSpinLongPress(LONG_PRESS_MS - 1), false);
     assert.equal(isAutoSpinLongPress(LONG_PRESS_MS), true);
+  });
+
+  it('keeps winning paid auto spins visible for at least two seconds, while misses keep the short gap', () => {
+    assert.ok(AUTO_SPIN_DELAY_MS.win >= 2000);
+    assert.equal(AUTO_SPIN_DELAY_MS.noWin, 280);
+    assert.ok(AUTO_SPIN_DELAY_MS.noWin < AUTO_SPIN_DELAY_MS.win);
   });
 
   it('keeps wager controls locked between automatic spins', () => {

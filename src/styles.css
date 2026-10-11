@@ -91,7 +91,8 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
    symbol has the same visual scale and centre point.  A higher-resolution
    file with the same name is picked up by symbolSrc without a code change. */
 .reel-slot img { position: absolute; left: 5%; top: -17.5%; width: 90%; height: 135%; object-fit: contain; user-select: none; pointer-events: none; backface-visibility: hidden; image-rendering: auto; filter: contrast(1.05) saturate(1.04) drop-shadow(0 .12cqw .15cqw #5a2f0066); }
-.reel-column.is-spinning .reel-slot img { filter: contrast(1.05) saturate(1.06) brightness(1.03) drop-shadow(0 .12cqw .15cqw #5a2f0066); }
+/* 手机上由合成层移动格子；图片滤镜只在转轴落定后恢复。 */
+.reel-column.is-spinning .reel-slot img, .reel-column.is-spinning .reel-slot.is-hush img { filter: none; }
 /* The buffalo is a square card, as in the reference game, so it is shown
    uncropped: a round crop cut off its horns and read as a lens shape. */
 /* Winning symbols pop, then keep breathing and glowing; the rest dim. */
@@ -102,7 +103,7 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .reel-slot.is-win img[alt="wild"] { animation: symbol-pop .45s cubic-bezier(.2,1.6,.4,1), wild-glow .55s .45s ease-in-out infinite alternate, symbol-blink 1.1s .45s steps(1, end) infinite; }
 @keyframes wild-glow { from { filter: brightness(1.05) drop-shadow(0 0 .4cqw #ffd35a); } to { filter: brightness(1.25) drop-shadow(0 0 1.6cqw #ffe28a) drop-shadow(0 0 .6cqw #ff9d00); } }
 @media (prefers-reduced-motion: reduce) { .reel-slot.is-win img, .reel-slot.is-win img[alt="wild"] { animation: none; } }
-.reel-slot.is-dim img { filter: brightness(.28) saturate(.38) contrast(.82); opacity: .58; transition: filter .25s, opacity .25s; }
+.reel-slot.is-dim img { filter: brightness(.66) saturate(.7) contrast(.92); opacity: .8; transition: filter .25s, opacity .25s; }
 @keyframes symbol-pop { 0% { scale: 1; } 45% { scale: 1.28; rotate: -3deg; } 100% { scale: 1.1; rotate: 0deg; } }
 @keyframes symbol-breathe {
   0%, 100% { scale: 1.1; filter: drop-shadow(0 0 .3cqw #fff6a0) brightness(1.05); }

@@ -1,5 +1,24 @@
 # 开发日志
 
+## 2026-10-12 · STEP-21 中奖压暗变轻、手机上转动更流畅、自动旋转中奖多停一会（第 1 次尝试）
+
+**做了什么**：
+
+- `src/styles.css`：非中奖格改为 `brightness(.66)`、轻度降饱和且 `opacity: .8`，保留其形状和颜色；中奖边框、闪烁及百搭发光规则未改动。转动列的图片明确覆盖为 `filter: none`，静止时仍恢复既有增强外观。
+- `src/useReels.ts`：逐帧格子位移由 `translateY(...)` 改为 `translate3d(0, ..., 0)`；原有 `.reel-slot { will-change: transform; }` 保留，以便移动端由合成层处理位移。
+- `src/game/autoSpin.ts`、`src/GameApp.tsx`：将付费自动旋转间隔提取为 `AUTO_SPIN_DELAY_MS`；中奖后等待 2000ms，未中奖仍为原有的 280ms。免费游戏和大奖展示的既有等待/阻塞逻辑未修改。
+- `src/game/game.test.ts`：新增自动旋转中奖/未中奖间隔断言；`docs/DEVELOPMENT_PLAN.md` 勾选 STEP-21。
+
+**怎么验证**：
+
+- `npm test` 通过：72/72；新测试确认中奖自动旋转间隔不少于 2000ms，未中奖保持 280ms。
+- `npm run build` 通过：`tsc -b && vite build`。
+- 源码复核：转动列选择器 `.reel-column.is-spinning .reel-slot img` 显式为 `filter: none`，并额外覆盖了同级的 anticipation `is-hush` 状态；每帧位移为 `translate3d`，格子仍声明 `will-change: transform`。项目规则禁止使用浏览器/电脑控制，故未在浏览器中读取实际计算样式。
+
+**遗留问题**：无代码遗留；浏览器中的实际计算样式与手机真机流畅度需由允许浏览器操作的审计环境复核。
+
+---
+
 ## 2026-10-11 · STEP-20 慢网络下的加载画面（Claude Code 人工开发模式，Codex 额度用完）
 
 **问题**：用户通过公网链接打开游戏，转轴上一半格子是空的。查明：13 张符号图片都能正常下载（全部 200），但隧道走的是欧洲节点（cloudflared 日志 `location=mrs06`），每张要 1 ~ 1.5 秒；页面先把转轴显示出来，图片陆续到达，前几秒很多格子是空白，约 12 秒后才全部出现。本地打开没有这个问题。

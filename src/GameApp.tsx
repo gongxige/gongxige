@@ -8,7 +8,7 @@ import { RulesModal } from './ui/Modals.tsx';
 import { TopBar } from './ui/TopBar.tsx';
 import { BigWin, bigWinTier } from './ui/BigWin.tsx';
 import { useWinCycle } from './useWinCycle.ts';
-import { AutoSpinController, highestAllowedBet, isBetChangeLocked, LONG_PRESS_MS, type AutoStopReason } from './game/autoSpin.ts';
+import { AUTO_SPIN_DELAY_MS, AutoSpinController, highestAllowedBet, isBetChangeLocked, LONG_PRESS_MS, type AutoStopReason } from './game/autoSpin.ts';
 
 type Config = { engineVersion?: string; protocol?: string; title: string; allowedBets: number[]; theoreticalRtp: number; maxWinMultiplier: number; mode: string; lobbyUrl?: string };
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number };
@@ -230,9 +230,9 @@ export default function GameApp() {
     if (freeSpins) { stopAuto('free-spins'); return; }
     if (autoSpin.current.remaining === 0) { stopAuto('player-stopped'); return; }
     if (credits < bet) { stopAuto('insufficient-funds'); setInsufficientFunds(true); return; }
-    const timer = setTimeout(() => spinRef.current(true), 280);
+    const timer = setTimeout(() => spinRef.current(true), win.amount > 0 ? AUTO_SPIN_DELAY_MS.win : AUTO_SPIN_DELAY_MS.noWin);
     return () => clearTimeout(timer);
-  }, [autoRemaining, spinning, overlay, celebrating, modal, freeSpins, credits, bet]);
+  }, [autoRemaining, spinning, overlay, celebrating, modal, freeSpins, credits, bet, win.amount]);
 
   // Dev-only preview of the celebration: /?preview-bigwin=30 shows a 30× bet win.
   useEffect(() => {

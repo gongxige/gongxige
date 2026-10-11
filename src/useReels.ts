@@ -36,7 +36,7 @@ export function useReels() {
       slots.current[reel].forEach((slot, k) => {
         if (!slot) return;
         const index = top + k;
-        slot.style.transform = `translateY(${(index + position) * 100}%)`;
+        slot.style.transform = `translate3d(0, ${(index + position) * 100}%, 0)`;
         const symbol = controller.tapes[reel].symbolAt(index);
         if (slot.dataset.symbol !== symbol) {
           slot.dataset.symbol = symbol;
