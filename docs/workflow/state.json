@@ -19,7 +19,8 @@
     "STEP-06": 2,
     "STEP-07": 1,
     "STEP-08": 3,
-    "STEP-09": 1
+    "STEP-09": 1,
+    "STEP-10": 0
   },
   "limits": {
     "STEP-01": 8
