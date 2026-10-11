@@ -49,6 +49,9 @@ describe('玩家认证接口', () => {
     const me = await request('/auth/me', { headers: { cookie: login.cookie! } });
     assert.equal(me.status, 200);
     assert.equal(me.body.player.username, 'cookieuser');
+    const balance = await request('/games/wild-frontier/balance', { headers: { cookie: login.cookie! } });
+    assert.equal(balance.status, 200);
+    assert.equal(balance.body.balance, 10_000);
     assert.equal((await request('/auth/logout', { method: 'POST', headers: { cookie: login.cookie! } })).status, 200);
     assert.equal((await request('/auth/me', { headers: { cookie: login.cookie! } })).status, 401);
   });

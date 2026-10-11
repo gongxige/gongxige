@@ -52,14 +52,23 @@ function recordProviderTransaction(db, values) {
       values.transactionId, values.refTransactionId ?? null, now(), now());
 }
 
-export function createPlayer(db, { id: playerId = id(), username }) {
+export function createPlayer(db, { id: playerId = id(), username, initialCredit = 0 }) {
   if (!username?.trim()) throw new LedgerError('INVALID_PLAYER', '用户名不能为空');
+  if (!Number.isSafeInteger(initialCredit) || initialCredit < 0) throw new LedgerError('INVALID_INITIAL_CREDIT', '初始演示积分无效');
   return inTransaction(db, () => {
     const timestamp = now();
     db.prepare('INSERT INTO players (id, username, status, created_at, updated_at) VALUES (?, ?, \'active\', ?, ?)')
       .run(playerId, username.trim(), timestamp, timestamp);
     db.prepare('INSERT INTO wallets (player_id, balance, frozen_balance, updated_at) VALUES (?, 0, 0, ?)')
       .run(playerId, timestamp);
+    if (initialCredit > 0) {
+      db.prepare('UPDATE wallets SET balance = ?, updated_at = ? WHERE player_id = ?').run(initialCredit, timestamp, playerId);
+      db.prepare(`INSERT INTO ledger_entries (
+        id, transaction_id, player_id, kind, amount, balance_delta, frozen_delta,
+        balance_after, frozen_after, status, round_id, request_id, ref_transaction_id, reason, created_at
+      ) VALUES (?, ?, ?, 'registration_credit', ?, ?, 0, ?, 0, 'completed', NULL, NULL, NULL, '演示账号初始积分', ?)`)
+        .run(id(), `registration-credit:${playerId}`, playerId, initialCredit, initialCredit, initialCredit, timestamp);
+    }
     return { id: playerId, username: username.trim() };
   });
 }

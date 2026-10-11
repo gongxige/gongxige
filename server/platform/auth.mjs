@@ -30,7 +30,9 @@ export async function registerPlayer(db, { username, password }) {
   if (!validUsername(username)) throw new LedgerError('INVALID_USERNAME', '用户名只能含 3-32 个字母、数字、下划线或连字符');
   const credentials = await hashPassword(password);
   try {
-    const player = createPlayer(db, { username });
+    // STEP-06 must be usable before the wallet top-up page arrives in STEP-07.
+    // This is a ledger-backed virtual demo grant, never a real-money balance.
+    const player = createPlayer(db, { username, initialCredit: 10_000 });
     db.prepare('UPDATE players SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?')
       .run(credentials.hash, credentials.salt, now(), player.id);
     return player;

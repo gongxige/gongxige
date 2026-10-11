@@ -153,7 +153,6 @@ const server = createServer(async (req, res) => {
       await changePassword(db, { playerId: player.id, ...parseJson(await readRaw(req)) });
       return json(res, 200, { ok: true });
     }
-    if (req.method === 'GET' && url.pathname === '/') return html(res, 200, '<meta charset="utf-8"><h1>演示平台</h1><p>仅虚拟积分。</p>');
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { location: 'http://127.0.0.1:4173/' }); return res.end(); }
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, state());
