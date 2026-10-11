@@ -6,6 +6,8 @@ export const PLATFORM_SCHEMA = `
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT,
     password_salt TEXT,
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    login_locked_until TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'frozen')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

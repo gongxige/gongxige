@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { json, html, parseJson, readRaw, signedPost, verify } from './server/http.mjs';
 import { openPlatformDatabase } from './server/platform/db.mjs';
 import { LedgerError, createDepositRequest, createPlayer, approveDeposit, creditWin, getWallet, placeBet, reconcilePlayer, refundBet } from './server/platform/ledger.mjs';
+import { authenticatePlayer, changePassword, createSessionStore, registerPlayer } from './server/platform/auth.mjs';
 
 export const PLATFORM_PROTOCOL = 'provider-v1';
 const port = Number(process.env.OPERATOR_PORT ?? 8788);
@@ -12,6 +13,7 @@ const operatorId = process.env.OPERATOR_ID ?? 'demo-operator';
 const secret = process.env.OPERATOR_SECRET ?? 'local-demo-secret';
 const providerUrl = process.env.PROVIDER_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? 8787}`;
 const db = openPlatformDatabase(join(process.env.DATA_DIR ?? join(process.cwd(), 'data'), process.env.PLATFORM_DB_FILE ?? 'platform.sqlite'));
+const sessions = createSessionStore();
 
 function seedPlayer(id, username, amount) {
   if (db.prepare('SELECT id FROM players WHERE id = ?').get(id)) return;
@@ -29,6 +31,13 @@ const slowTransactions = new Set();
 const SLOW_MS = Number(process.env.SLOW_BET_MS ?? 8000);
 const isAmount = (value, zero = false) => Number.isSafeInteger(value) && (zero ? value >= 0 : value > 0);
 const fail = (res, status, code, error) => json(res, status, { code, error });
+const cookieValue = (req, name) => (req.headers.cookie ?? '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+const setSessionCookie = (res, token) => res.setHeader('set-cookie', `platform_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800`);
+const clearSessionCookie = (res) => res.setHeader('set-cookie', 'platform_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+function currentPlayer(req) {
+  const id = sessions.get(cookieValue(req, 'platform_session'));
+  return id ? db.prepare('SELECT id, username, status FROM players WHERE id = ?').get(id) : null;
+}
 
 function walletResponse(res, action, input) {
   const { playerId, transactionId, roundId, amount } = input;
@@ -59,7 +68,7 @@ function walletResponse(res, action, input) {
       return json(res, 200, { transactionId, balance: result.balance, duplicate: result.idempotent || undefined });
     }
   } catch (error) {
-    if (error instanceof LedgerError) return fail(res, error.code === 'INSUFFICIENT_FUNDS' ? 402 : 404, error.code, error.message);
+    if (error instanceof LedgerError) return fail(res, error.code === 'INSUFFICIENT_FUNDS' ? 402 : error.code === 'PLAYER_FROZEN' ? 403 : 404, error.code, error.message);
     throw error;
   }
 }
@@ -101,6 +110,31 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   try {
     if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, role: 'platform', protocol: PLATFORM_PROTOCOL, operatorId });
+    if (req.method === 'POST' && url.pathname === '/auth/register') {
+      const player = await registerPlayer(db, parseJson(await readRaw(req)));
+      return json(res, 201, { player: { id: player.id, username: player.username } });
+    }
+    if (req.method === 'POST' && url.pathname === '/auth/login') {
+      const player = await authenticatePlayer(db, parseJson(await readRaw(req)));
+      setSessionCookie(res, sessions.create(player.id));
+      return json(res, 200, { player });
+    }
+    if (req.method === 'POST' && url.pathname === '/auth/logout') {
+      sessions.delete(cookieValue(req, 'platform_session'));
+      clearSessionCookie(res);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && url.pathname === '/auth/me') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      return json(res, 200, { player });
+    }
+    if (req.method === 'POST' && url.pathname === '/auth/password') {
+      const player = currentPlayer(req);
+      if (!player) return fail(res, 401, 'UNAUTHENTICATED', '请先登录');
+      await changePassword(db, { playerId: player.id, ...parseJson(await readRaw(req)) });
+      return json(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && url.pathname === '/') return html(res, 200, '<meta charset="utf-8"><h1>演示平台</h1><p>仅虚拟积分。</p>');
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, state());
@@ -117,7 +151,13 @@ const server = createServer(async (req, res) => {
       if (['balance', 'bet', 'win'].includes(action)) return walletResponse(res, action, input);
     }
     json(res, 404, { error: 'Not found' });
-  } catch (error) { json(res, 400, { code: 'BAD_REQUEST', error: error instanceof Error ? error.message : 'Bad request' }); }
+  } catch (error) {
+    if (error instanceof LedgerError) {
+      const status = error.code === 'USERNAME_TAKEN' ? 409 : error.code === 'PLAYER_FROZEN' ? 403 : error.code === 'LOGIN_RATE_LIMITED' ? 429 : error.code === 'INVALID_CREDENTIALS' ? 401 : 400;
+      return fail(res, status, error.code, error.message);
+    }
+    json(res, 400, { code: 'BAD_REQUEST', error: error instanceof Error ? error.message : 'Bad request' });
+  }
 });
 server.on('error', (error) => { if (error.code === 'EADDRINUSE') { console.log(`端口 ${port} 已被占用。`); process.exit(1); } throw error; });
 server.listen(port, '127.0.0.1', () => console.log(`演示平台: http://127.0.0.1:${port}  平台编号 ${operatorId}`));

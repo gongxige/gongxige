@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-11 · STEP-05 玩家注册、登录（接口）（第 1 次）
+
+**做了什么**：新增 `server/platform/auth.mjs`，以 Node 内置 `node:crypto` 的 scrypt 和随机盐保存密码哈希；平台注册、登录、退出、当前玩家和修改密码接口分别为 `/auth/register`、`/auth/login`、`/auth/logout`、`/auth/me`、`/auth/password`。登录会写入 `HttpOnly; SameSite=Lax` cookie；同一账号连续 5 次密码错误会被限制 15 分钟。数据库补充失败登录计数与锁定截止时间；冻结账号登录返回 403，供应商签名下注也返回 403。
+
+**怎么验证的**：运行 `npm test`，43 项测试全部通过；新增接口测试覆盖重复用户名 409、错误密码 401、第五次连续失败触发 429、未登录访问 `/auth/me` 的 401、冻结账号的登录/下注拒绝，以及 SQLite 数据库文件中不存在明文密码。随后运行 `npm run build` 和 `npm run check:provider`，均通过。
+
+**遗留问题**：会话暂存于平台服务进程内存，服务重启后会要求重新登录；持久会话与前端页面留待后续步骤实现。
+
+---
+
 ## 2026-10-11 · STEP-04 平台服务接管钱包接口（第 1 次）
 
 **做了什么**：新增 `platform-server.mjs`，在 8788 端口以 STEP-03 的 SQLite 账本提供 provider-v1 的 `/wallet/balance`、`/wallet/bet`、`/wallet/win` 和 `/wallet/refund`。签名、交易号幂等、余额不足、派彩故障、扣款确认超时与回滚均由新服务处理；回滚会作废未抵达的原扣款交易号。平台还保留仅供本地检查的状态/故障接口，并通过 `/launch` 以签名调用游戏服务器的 `/provider/launch`。`npm start` 和 `check:provider` 已切换到新服务；`mock-operator.mjs` 保留为阶段 6 的历史参考，不再由启动命令调用。
