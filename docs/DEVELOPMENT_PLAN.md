@@ -131,7 +131,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 
 目标：手机上像成熟 H5 老虎机，拿给合作伙伴看不掉价。说明见 [GAME_POLISH_SPEC.md](GAME_POLISH_SPEC.md)，按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-12 ~ STEP-17 自动开发。只改画面和手感，不改 `src/engine/`。
 
-- [x] STEP-12 手机上铺满屏幕、竖屏自动横向显示
+- [x] STEP-12 手机上铺满屏幕、竖屏自动横向显示（第 2 次审计修正已完成）
 - [ ] STEP-13 顶部信息条、底部按钮条、MAX、自动旋转
 - [ ] STEP-14 夜景背景和转轴边框
 - [ ] STEP-15 转动手感：变慢、不糊

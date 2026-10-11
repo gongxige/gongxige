@@ -228,7 +228,7 @@ export default function GameApp() {
       {noSession && !staleApi && <div className="toast is-blocking" role="alert">请从平台大厅进入游戏（会话无效或已过期）。<a href="/">打开平台大厅</a></div>}
       {error && !staleApi && !noSession && <button type="button" className="toast" onClick={() => setError('')}>{error}</button>}
       <ControlBar bet={shownBet} bets={config?.allowedBets ?? ALLOWED_BETS} onBetChange={setBet} betLocked={spinning || inFreeSpins} winDisplay={showWin ? displayWin : null} message={freeSpins && !showWin ? freeMessage : message} spinning={spinning} freeSpins={inFreeSpins} winning={showWin} spinDisabled={spinDisabled} onSpin={spin} />
+      {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
     </section>
-    {modal === 'rules' && <RulesModal bet={bet} onClose={() => setModal(null)} />}
   </main>;
 }
