@@ -1,5 +1,20 @@
 # 开发日志
 
+## 2026-10-12 · STEP-30 麻将连连胡接入平台（Claude Code 人工开发模式，Codex 额度用完）
+
+**做了什么**
+
+- `platform-server.mjs`：`PLATFORM_GAMES`（wild-frontier / mahjong-cascade）；启动接口改为 `POST /games/:gameId/launch`（未知游戏 404，未登录 401），带 `gameId` 调游戏服务器 `/provider/launch`；`/api/admin/overview` 增加 `games`：从游戏服务器局记录（本平台最近 500 局中属于今天的局）按游戏统计局数、下注、派彩。Wild Frontier 的 `/games/wild-frontier/launch` 路径和行为不变（进入 `/`）。
+- `src/App.tsx`：大厅显示两张游戏卡片，各自启动；玩家游戏记录每条前面显示游戏名。
+- `src/admin/AdminApp.tsx`：后台游戏记录每条显示游戏名；概览增加"按游戏"表格。玩家和后台点局号回放都走已按游戏区分的回放页（STEP-27）。
+- 测试 `src/platform/mahjong-platform.test.ts`（3 个）：两款游戏都能从平台启动、未知游戏 404、未登录 401、Wild Frontier 入口不变；**玩家只能看到自己的麻将记录**（另一个玩家的列表里没有、回放 404，本人回放 200）；后台局记录带 `gameId` 和用户名、能回放麻将局，概览按游戏统计出两款游戏。
+
+**怎么验证的**：`npm run build`、`npm test`（90/90）、`npm run check:provider`、`npm run check:platform` 全部通过；无界面 Chrome 截图大厅出现两张卡片。
+
+**遗留问题**：同 STEP-28（投注只能 10,000，新玩家余额只够 1 局；四种低分牌赔付极低）。
+
+---
+
 ## 2026-10-12 · STEP-29 麻将连连胡动画：消除连锁、倍数、金色变百搭、免费旋转（Claude Code 人工开发模式，Codex 额度用完）
 
 **做了什么**

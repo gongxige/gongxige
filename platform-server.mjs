@@ -123,10 +123,13 @@ function state() {
   return { players, transactions };
 }
 
-async function createLaunch(playerId) {
+/** Games in the lobby (the game server knows the same ids). */
+export const PLATFORM_GAMES = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
+
+async function createLaunch(playerId, gameId = 'wild-frontier') {
   const player = db.prepare('SELECT id, username FROM players WHERE id = ?').get(playerId);
   if (!player) throw new LedgerError('PLAYER_NOT_FOUND', 'Player not found');
-  const { status, body } = await signedPost(`${providerUrl}/provider/launch`, { operatorId, playerId: player.id, playerName: player.username, currency: 'DEMO' }, { secret, operatorId, timeoutMs: 90_000 });
+  const { status, body } = await signedPost(`${providerUrl}/provider/launch`, { operatorId, playerId: player.id, playerName: player.username, currency: 'DEMO', gameId }, { secret, operatorId, timeoutMs: 90_000 });
   if (status !== 200 || !body.gameUrl) throw new Error(body.error || `HTTP ${status}`);
   return body;
 }
@@ -165,7 +168,18 @@ async function adminApi(req, res, url) {
     return json(res, 200, { ok: true });
   }
   if (req.method === 'GET' && path === '/auth/me') return json(res, 200, { admin });
-  if (req.method === 'GET' && path === '/overview') return json(res, 200, overview(db));
+  if (req.method === 'GET' && path === '/overview') {
+    // Per-game numbers come from the game server's round records (this operator's latest 500 rounds, today only).
+    const totals = overview(db);
+    const { status, body } = await operatorRounds();
+    const byGame = Object.fromEntries(Object.entries(PLATFORM_GAMES).map(([gameId, title]) => [gameId, { title, rounds: 0, bets: 0, wins: 0 }]));
+    if (status === 200) for (const round of body.records) {
+      if (round.at < totals.since) continue;
+      const game = byGame[round.gameId ?? 'wild-frontier']; if (!game) continue;
+      game.rounds += 1; game.bets += round.mode === 'free' ? 0 : round.bet; game.wins += round.payout;
+    }
+    return json(res, 200, { ...totals, games: Object.values(byGame), gamesAvailable: status === 200 });
+  }
   if (req.method === 'GET' && path === '/players') return json(res, 200, { players: listPlayers(db, { query: url.searchParams.get('q') ?? '' }) });
   if (req.method === 'GET' && path === '/audit-logs') return json(res, 200, { logs: listAuditLogs(db, { limit: url.searchParams.get('limit') }) });
   const requestList = path.match(/^\/(deposit|withdrawal)-requests$/);
@@ -270,10 +284,12 @@ const server = createServer(async (req, res) => {
       const request = createWithdrawalRequest(db, { playerId: player.id, requestNo: `withdrawal-${randomUUID()}`, amount });
       return json(res, 201, { request });
     }
-    if (req.method === 'POST' && url.pathname === '/games/wild-frontier/launch') {
+    const launchMatch = req.method === 'POST' && url.pathname.match(/^\/games\/([\w-]+)\/launch$/);
+    if (launchMatch) {
       const player = currentPlayer(req);
       if (!player) return fail(res, 401, 'UNAUTHENTICATED', 'Please log in');
-      return json(res, 200, await createLaunch(player.id));
+      if (!PLATFORM_GAMES[launchMatch[1]]) return fail(res, 404, 'UNKNOWN_GAME', '没有这款游戏');
+      return json(res, 200, await createLaunch(player.id, launchMatch[1]));
     }
     if (req.method === 'POST' && url.pathname === '/auth/password') {
       const player = currentPlayer(req);

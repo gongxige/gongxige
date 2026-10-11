@@ -353,3 +353,4 @@ button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .mj-overlay.is-free-start { background: radial-gradient(circle, #a3262bee, #2a0508f2 70%); }
 @keyframes mj-pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .mj-cell .mj-tile, .mj-overlay strong { animation: none !important; } }
+.admin-games { grid-column: 1 / -1; }

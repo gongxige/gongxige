@@ -5,14 +5,14 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 // review, all transactions, all game rounds, reconciliation, fault simulation
 // and the audit log.
 type Admin = { id: string; username: string };
-type Overview = { players: number; frozenPlayers: number; depositsApproved: number; withdrawalsApproved: number; bets: number; wins: number; platformProfit: number };
+type Overview = { players: number; frozenPlayers: number; depositsApproved: number; withdrawalsApproved: number; bets: number; wins: number; platformProfit: number; games?: { title: string; rounds: number; bets: number; wins: number }[]; gamesAvailable?: boolean };
 type PlayerRow = { id: string; username: string; status: string; createdAt: string; balance: number; frozenBalance: number };
 type LedgerRow = { transactionId: string; kind: string; amount: number; balanceDelta: number; balanceAfter: number; status: string; roundId: string | null; reason: string | null; createdAt: string };
 type PlayerDetail = { player: { id: string; username: string; status: string; createdAt: string }; wallet: { balance: number; frozen_balance: number }; reconciled: boolean; ledger: LedgerRow[] };
 type AuditLog = { id: string; admin: string; action: string; targetType: string | null; targetId: string | null; reason: string | null; details: Record<string, unknown> | null; createdAt: string };
 type ReviewRow = { id: string; requestNo: string; playerId: string; username: string; amount: number; status: string; reviewedBy: string | null; reviewedAt: string | null; reviewNote: string | null; createdAt: string };
 type TransactionRow = LedgerRow & { playerId: string; username: string; frozenDelta: number };
-type RoundRow = { roundId: string; at: string; bet: number; payout: number; playerId: string; username: string | null; mode: string; status: string };
+type RoundRow = { roundId: string; gameId?: string; at: string; bet: number; payout: number; playerId: string; username: string | null; mode: string; status: string };
 type ReconRow = { playerId: string; username: string; status: string; entries: number; balance: number; ledgerBalance: number; balanceDiff: number; frozen: number; ledgerFrozen: number; frozenDiff: number; ok: boolean };
 type FaultState = { kind: string; remaining: number; label: string; kinds: Record<string, string> };
 type Tab = 'overview' | 'players' | 'deposits' | 'withdrawals' | 'transactions' | 'rounds' | 'reconciliation' | 'faults' | 'logs';
@@ -25,6 +25,7 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const fmt = (n: number) => n.toLocaleString('zh-CN');
+const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
 const time = (iso: string) => new Date(iso).toLocaleString('zh-CN');
 const kindLabel: Record<string, string> = { registration_credit: '注册赠送', deposit_approved: '充值到账', withdrawal_freeze: '提现冻结', withdrawal_approved: '提现完成', withdrawal_rejected: '提现被拒（解冻）', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
 const actionLabel: Record<string, string> = { login: '登录后台', logout: '退出后台', freeze_player: '冻结玩家', unfreeze_player: '解冻玩家', adjust_balance: '调整余额', approve_deposit: '通过充值', reject_deposit: '拒绝充值', approve_withdrawal: '通过提现', reject_withdrawal: '拒绝提现', set_fault: '故障模拟' };
@@ -49,7 +50,11 @@ function OverviewPanel() {
   useEffect(() => { adminFetch<Overview>('/overview').then(setData).catch((error: Error) => setMessage(error.message)); }, []);
   if (!data) return <p className="form-message">{message || '加载中…'}</p>;
   const cards: [string, string][] = [['玩家数', `${fmt(data.players)}（冻结 ${fmt(data.frozenPlayers)}）`], ['今日充值到账', fmt(data.depositsApproved)], ['今日提现完成', fmt(data.withdrawalsApproved)], ['今日下注', fmt(data.bets)], ['今日派彩', fmt(data.wins)], ['今日平台盈亏', fmt(data.platformProfit)]];
-  return <section className="admin-cards" aria-label="概览">{cards.map(([label, value]) => <article key={label} className="admin-card"><span>{label}</span><strong className={label === '今日平台盈亏' && data.platformProfit < 0 ? 'negative' : undefined}>{value}</strong></article>)}<p className="admin-hint">金额单位为 DEMO 虚拟积分；"今日"按本机日期计算，平台盈亏 = 下注 − 派彩（已回滚的下注不计）。</p></section>;
+  return <section className="admin-cards" aria-label="概览">{cards.map(([label, value]) => <article key={label} className="admin-card"><span>{label}</span><strong className={label === '今日平台盈亏' && data.platformProfit < 0 ? 'negative' : undefined}>{value}</strong></article>)}<p className="admin-hint">金额单位为 DEMO 虚拟积分；"今日"按本机日期计算，平台盈亏 = 下注 − 派彩（已回滚的下注不计）。</p>
+    {data.games && <div className="admin-table-wrap admin-games"><table className="admin-table"><thead><tr><th>游戏</th><th>今日局数</th><th>今日下注</th><th>今日派彩</th><th>今日盈亏</th></tr></thead>
+      <tbody>{data.games.map((g) => <tr key={g.title}><td>{g.title}</td><td>{fmt(g.rounds)}</td><td>{fmt(g.bets)}</td><td>{fmt(g.wins)}</td><td className={g.bets - g.wins < 0 ? 'negative' : undefined}>{fmt(g.bets - g.wins)}</td></tr>)}</tbody></table>
+      <p className="admin-hint">按游戏的数字来自游戏服务器的局记录（本平台最近 500 局中属于今天的局）{data.gamesAvailable ? '' : '；游戏服务器暂时连不上，显示为 0'}。</p></div>}
+  </section>;
 }
 
 function PlayerDetailPanel({ playerId, onBack }: { playerId: string; onBack: () => void }) {
@@ -141,7 +146,7 @@ function RoundsPanel() {
   const [rows, setRows] = useState<RoundRow[]>([]); const [message, setMessage] = useState('');
   useEffect(() => { adminFetch<{ rounds: RoundRow[] }>('/rounds').then(({ rounds }) => setRows(rounds)).catch((error: Error) => setMessage(error.message)); }, []);
   return <section>{message && <p className="form-message" role="status">{message}</p>}<p className="admin-hint">所有玩家最近 500 局；点局号在新页面打开回放（含"重新计算是否一致"）。</p>
-    <div className="records-list">{rows.length ? rows.map((row) => <article className="record game-record" key={row.roundId}><b>{row.username ?? row.playerId} · {time(row.at)}</b><span>{row.mode === 'free' ? '免费局' : `投注 ${fmt(row.bet)}`} · 赢分 {fmt(row.payout)}</span><em className={row.status === 'settled' ? undefined : 'negative'}>{row.status === 'settled' ? '已结算' : '派彩待发'}</em><a href={`/api/admin/rounds/${encodeURIComponent(row.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{row.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section>;
+    <div className="records-list">{rows.length ? rows.map((row) => <article className="record game-record" key={row.roundId}><b>{GAME_TITLES[row.gameId ?? 'wild-frontier'] ?? row.gameId} · {row.username ?? row.playerId} · {time(row.at)}</b><span>{row.mode === 'free' ? '免费局' : `投注 ${fmt(row.bet)}`} · 赢分 {fmt(row.payout)}</span><em className={row.status === 'settled' ? undefined : 'negative'}>{row.status === 'settled' ? '已结算' : '派彩待发'}</em><a href={`/api/admin/rounds/${encodeURIComponent(row.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{row.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section>;
 }
 
 function ReconciliationPanel() {

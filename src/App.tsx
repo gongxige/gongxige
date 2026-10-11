@@ -6,7 +6,12 @@ import MahjongApp from './mahjong/MahjongApp.tsx';
 type Player = { id: string; username: string; status: string };
 type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
 type WalletRecord = { kind: string; amount: number; status: string; createdAt: string };
-type GameRecord = { roundId: string; at: string; bet: number; payout: number };
+type GameRecord = { roundId: string; gameId?: string; at: string; bet: number; payout: number };
+const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
+const LOBBY_GAMES = [
+  { gameId: 'wild-frontier', title: 'Wild Frontier', art: '♜', sub: '1024 Ways · 虚拟积分体验' },
+  { gameId: 'mahjong-cascade', title: '麻将连连胡', art: '中', sub: '2000 Ways · 消除连锁 · 金色变百搭' },
+];
 type View = 'login' | 'register' | 'lobby' | 'wallet' | 'game-records' | 'profile';
 
 class PlatformError extends Error {}
@@ -36,11 +41,11 @@ function AuthCard({ view, onSuccess, onSwitch }: { view: Exclude<View, 'lobby'>;
 }
 
 function Lobby({ player, onLogout, onWallet, onGameRecords, onProfile }: { player: Player; onLogout: () => void; onWallet: () => void; onGameRecords: () => void; onProfile: () => void }) {
-  const [wallet, setWallet] = useState<Wallet | null>(null); const [message, setMessage] = useState(''); const [launching, setLaunching] = useState(false);
+  const [wallet, setWallet] = useState<Wallet | null>(null); const [message, setMessage] = useState(''); const [launching, setLaunching] = useState<string | null>(null);
   useEffect(() => { platformFetch<Wallet>('/games/wild-frontier/balance').then(setWallet).catch((error: Error) => setMessage(error.message)); }, []);
-  async function launch() { setLaunching(true); setMessage('正在连接 Wild Frontier…'); try { const { gameUrl } = await platformFetch<{ gameUrl: string }>('/games/wild-frontier/launch', { method: 'POST', body: '{}' }); const target = new URL(gameUrl, location.href); location.assign(target.pathname + target.search); } catch (error) { setMessage(error instanceof Error ? error.message : '暂时无法启动游戏。'); setLaunching(false); } }
+  async function launch(gameId: string) { setLaunching(gameId); setMessage(`正在连接 ${GAME_TITLES[gameId]}…`); try { const { gameUrl } = await platformFetch<{ gameUrl: string }>(`/games/${gameId}/launch`, { method: 'POST', body: '{}' }); const target = new URL(gameUrl, location.href); location.assign(target.pathname + target.search); } catch (error) { setMessage(error instanceof Error ? error.message : '暂时无法启动游戏。'); setLaunching(null); } }
   async function logout() { await platformFetch('/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined); onLogout(); }
-  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO GAME LOBBY</p><h1>你好，{player.username}</h1></div><div className="header-actions"><button className="text-button" onClick={onWallet}>我的钱包</button><button className="text-button" onClick={onGameRecords}>游戏记录</button><button className="text-button" onClick={onProfile}>个人中心</button><button className="text-button" onClick={logout}>退出登录</button></div></header><section className="wallet-panel" aria-label="虚拟积分余额"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>DEMO · 仅供本地演示</small></section><section className="games-section"><div><p className="eyebrow">游戏大厅</p><h2>选择一款游戏</h2></div><button className="game-card" onClick={launch} disabled={launching} aria-label="进入 Wild Frontier"><span className="game-card-art">♜</span><span className="game-card-body"><b>Wild Frontier</b><small>1024 Ways · 虚拟积分体验</small></span><span className="game-card-action">{launching ? '启动中…' : '进入游戏 →'}</span></button>{message && <p className="form-message" role="status">{message}</p>}</section></main>;
+  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">DEMO GAME LOBBY</p><h1>你好，{player.username}</h1></div><div className="header-actions"><button className="text-button" onClick={onWallet}>我的钱包</button><button className="text-button" onClick={onGameRecords}>游戏记录</button><button className="text-button" onClick={onProfile}>个人中心</button><button className="text-button" onClick={logout}>退出登录</button></div></header><section className="wallet-panel" aria-label="虚拟积分余额"><span>可用虚拟积分</span><strong>{wallet ? wallet.balance.toLocaleString('zh-CN') : '—'}</strong><small>DEMO · 仅供本地演示</small></section><section className="games-section"><div><p className="eyebrow">游戏大厅</p><h2>选择一款游戏</h2></div>{LOBBY_GAMES.map((game) => <button key={game.gameId} className={`game-card game-${game.gameId}`} onClick={() => launch(game.gameId)} disabled={launching !== null} aria-label={`进入 ${game.title}`}><span className="game-card-art">{game.art}</span><span className="game-card-body"><b>{game.title}</b><small>{game.sub}</small></span><span className="game-card-action">{launching === game.gameId ? '启动中…' : '进入游戏 →'}</span></button>)}{message && <p className="form-message" role="status">{message}</p>}</section></main>;
 }
 
 const kindLabel: Record<string, string> = { deposit: '充值申请', withdrawal: '提现申请', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
@@ -57,7 +62,7 @@ function WalletPage({ onBack }: { onBack: () => void }) {
 function GameRecordsPage({ onBack }: { onBack: () => void }) {
   const [records, setRecords] = useState<GameRecord[]>([]); const [message, setMessage] = useState('');
   useEffect(() => { platformFetch<{ records: GameRecord[] }>('/api/game-records').then(({ records: next }) => setRecords(next)).catch((error: Error) => setMessage(error.message)); }, []);
-  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">MY GAME HISTORY</p><h1>游戏记录</h1></div><button className="text-button" onClick={onBack}>返回大厅</button></header><section className="records-section"><p>仅显示当前登录账号的每一局；点击局号可在新页面查看回放。</p>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{records.length ? records.map((record) => <article className="record game-record" key={record.roundId}><b>{new Date(record.at).toLocaleString('zh-CN')}</b><span>投注 {record.bet.toLocaleString('zh-CN')} DEMO</span><em>赢分 {record.payout.toLocaleString('zh-CN')} DEMO</em><a href={`/api/game-records/${encodeURIComponent(record.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{record.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section></main>;
+  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">MY GAME HISTORY</p><h1>游戏记录</h1></div><button className="text-button" onClick={onBack}>返回大厅</button></header><section className="records-section"><p>仅显示当前登录账号的每一局；点击局号可在新页面查看回放。</p>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{records.length ? records.map((record) => <article className="record game-record" key={record.roundId}><b>{GAME_TITLES[record.gameId ?? 'wild-frontier'] ?? record.gameId} · {new Date(record.at).toLocaleString('zh-CN')}</b><span>投注 {record.bet.toLocaleString('zh-CN')} DEMO</span><em>赢分 {record.payout.toLocaleString('zh-CN')} DEMO</em><a href={`/api/game-records/${encodeURIComponent(record.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{record.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section></main>;
 }
 
 function ProfilePage({ onBack }: { onBack: () => void }) {
