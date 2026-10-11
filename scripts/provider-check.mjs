@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { sign, signedPost } from '../server/http.mjs';
 import { replayPage } from '../server/replay-page.mjs';
 
-const SPINS = Number(process.argv[2] ?? 1);
+const SPINS = Number(process.argv[2] ?? 10);
 // A per-process port pair makes repeated checks independent from a previous
 // interrupted run whose child processes are still shutting down.
 const OP_PORT = 18_000 + (process.pid % 1_000) * 2;
