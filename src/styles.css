@@ -427,9 +427,10 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-art-mascot, .rabbit-art-banner, .rabbit-art-reel, .rabbit-art-bar { position: absolute; }
 .rabbit-art-mascot { z-index: 3; pointer-events: none; }
 .rabbit-art-mascot .rabbit-mascot { bottom: 4%; width: 78%; }
-.rabbit-art-banner, .rabbit-art-bar { z-index: 4; display: grid; place-items: center; overflow: hidden; color: #ffe590; font: 900 3.4cqw/1.1 "KaiTi", "STKaiti", "Microsoft YaHei", serif; text-align: center; white-space: nowrap; text-shadow: 0 .35cqw 0 #6a1426, 0 0 1.4cqw #3a0a2a, 0 0 .5cqw #000; }
-.rabbit-art-bar { font-size: 4.2cqw; }
-.rabbit-art-banner span, .rabbit-art-bar span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.rabbit-art-banner, .rabbit-art-bar { z-index: 4; display: grid; place-items: center; overflow: hidden; color: #ffe590; font: 900 max(10px, 3.4cqw)/1.1 "KaiTi", "STKaiti", "Microsoft YaHei", serif; text-align: center; white-space: nowrap; text-shadow: 0 .35cqw 0 #6a1426, 0 0 1.4cqw #3a0a2a, 0 0 .5cqw #000; }
+.rabbit-art-bar { font-size: max(11px, 4.2cqw); }
+.rabbit-art-banner { overflow: visible; }
+.rabbit-art-bar span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .rabbit-art-reel { z-index: 2; display: flex; }
 .has-art .rabbit-reel-column { flex: 1; height: 100%; gap: 0; border-radius: .6cqw; background: linear-gradient(180deg, #24205c, #19164a 50%, #221d58); box-shadow: inset 0 0 2cqw #07052299; }
 .has-art .rabbit-reel-column::after { display: none; }
@@ -448,7 +449,8 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-paytable .rabbit-plate-image b { font-size: 1.6cqw; }
 .rabbit-knot-image { object-fit: cover; }
 @media (max-height: 520px) and (orientation: landscape) {
-  .rabbit-stage.has-art { --art-top: 15cqh; --art-bottom: 0px; }
+  .rabbit-stage.has-art { --art-top: 12cqh; --art-bottom: 0px; }
+  .has-art .rabbit-demo-note { left: calc(50% + var(--art-w) / 2 + 1.5%); right: 1.5%; font-size: 2.6cqh; }
   .has-art .rabbit-bottom { top: var(--art-top); left: calc(50% + var(--art-w) / 2 + 1.5%); right: 1.5%; bottom: 4%; height: auto; padding: 1cqh 0; border: 0; background: none; }
   .has-art .rabbit-stats { position: static; width: 100%; height: auto; min-height: 16cqh; }
   .has-art .rabbit-controls { margin-left: 0; flex-wrap: wrap; justify-content: center; gap: 1.6cqh; }
