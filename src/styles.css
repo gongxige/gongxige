@@ -525,3 +525,40 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-reel-column.is-spinning > .rabbit-cell { visibility: hidden; }
 /* 减少动态效果：转动时滚动带静止（停在 -50%，正好显示一份完整符号），停轴回弹和蓝光也不动；写在上面的滚动规则之后才能覆盖它 */
 @media (prefers-reduced-motion: reduce) { .rabbit-reel-column.is-spinning .rabbit-rolling-track { animation: none; } }
+/* STEP-51：规则与赔付表，结构参考参考游戏规则页（分节、居中标题、赔付表百搭单独一行） */
+.rabbit-rules { width: min(94%, 600px); background: #23242c; border-color: #6b5a3a; color: #d9dae0; }
+.rabbit-rules .rabbit-modal-heading { justify-content: center; position: relative; color: #fff; }
+.rabbit-rules .rabbit-modal-heading button { position: absolute; right: 0; }
+.rabbit-rule-section { padding: 2.2cqw 0 1.6cqw; border-bottom: .15cqw solid #ffffff1a; }
+.rabbit-rule-section h3 { margin: 0 0 1.6cqw; color: #fff; text-align: center; font-size: 2.6cqw; font-weight: 700; }
+.rabbit-rule-section ul { margin: 0; padding-left: 3cqw; }
+.rabbit-rule-section li { margin: .8cqw 0; color: #c9cad2; font-size: 1.85cqw; line-height: 1.6; }
+.rabbit-rules .rabbit-paytable { display: grid; gap: 2cqw; margin-bottom: 1.4cqw; }
+.rabbit-paytable-row { display: flex; justify-content: center; gap: 4cqw; }
+.rabbit-paytable-item { display: grid; justify-items: center; gap: .3cqw; width: 14cqw; padding: 0; border: 0; background: none; }
+.rabbit-rules .rabbit-paytable .rabbit-symbol { width: 13cqw; height: 11cqw; }
+.rabbit-paytable-item span { color: #c9cad2; font-size: 1.55cqw; }
+.rabbit-paytable-item strong { color: #ffb45c; font: 800 2.2cqw Georgia, serif; }
+.rabbit-paytable-item small { color: #9a9ba6; font-size: 1.45cqw; }
+.rabbit-rule-plates { display: flex; justify-content: center; gap: 2cqw; margin-bottom: 1.2cqw; }
+.rabbit-rule-plate { position: relative; width: 16cqw; height: 11cqw; }
+.rabbit-rule-plate > .rabbit-symbol { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rabbit-rule-buttons { display: grid; grid-template-columns: auto 1fr; gap: 1.2cqw 2cqw; margin: 0; align-items: start; }
+.rabbit-rule-buttons dt { margin: 0; }
+.rabbit-rule-buttons dd { margin: 0; color: #c9cad2; font-size: 1.85cqw; line-height: 1.6; }
+.rule-icon { display: inline-grid; place-items: center; min-width: 9cqw; min-height: 4.4cqw; padding: 0 1cqw; border: .2cqw solid #e2bd63; border-radius: 1cqw; background: linear-gradient(#27717a, #123f4a); color: #fff0ae; font-size: 1.7cqw; font-weight: 800; white-space: nowrap; }
+.rule-icon.is-spin { background: linear-gradient(#ffdb79, #d97822 52%, #873117); color: #fff9d3; }
+.rabbit-rules .rabbit-payline-grid { margin-bottom: 1.4cqw; }
+.rabbit-rules .rabbit-payline-grid figcaption { color: #fff; }
+@media (max-width: 520px) {
+  .rabbit-rule-section h3 { font-size: 4cqw; }
+  .rabbit-rule-section li, .rabbit-rule-buttons dd { font-size: 3.1cqw; }
+  .rabbit-paytable-item { width: 24cqw; }
+  .rabbit-rules .rabbit-paytable .rabbit-symbol { width: 22cqw; height: 18cqw; }
+  .rabbit-paytable-item span, .rabbit-paytable-item small { font-size: 2.6cqw; }
+  .rabbit-paytable-item strong { font-size: 3.6cqw; }
+  .rabbit-rule-plate { width: 26cqw; height: 18cqw; }
+  .rule-icon { min-width: 14cqw; min-height: 7cqw; font-size: 2.8cqw; }
+}
+.rabbit-rules .rabbit-paytable { grid-template-columns: 1fr; }
+.rabbit-rules .rabbit-paytable > .rabbit-paytable-row { display: flex; padding: 0; border: 0; background: none; }

@@ -1,10 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   BOARD_HEIGHTS,
   BONUS_MULTIPLIERS,
   MATH_MODE_STRIPS,
   MATH_STRIPS,
+  MATH_CONFIG_VERSION,
   MAX_WIN_MULTIPLIER,
+  MODE_SPINS,
   PAYLINES,
   PAYTABLE,
   type Board,
@@ -61,7 +63,7 @@ const MODE_TIERS = tiersOf(MATH_MODE_STRIPS);
 const fmtTiers = (tiers: readonly number[]) => tiers.map((tier) => `×${tier}`).join('、');
 
 const PAYTABLE_LABELS: Record<string, string> = {
-  WILD: '玉云百搭', YUANBAO: '元宝', FU_BAG: '福袋', RED_ENVELOPE: '红包',
+  WILD: '百搭', YUANBAO: '元宝', FU_BAG: '福袋', RED_ENVELOPE: '红包',
   COPPER_COIN: '铜钱', FIRECRACKER: '鞭炮', CARROT: '胡萝卜',
 };
 
@@ -124,30 +126,120 @@ function RabbitSymbol({ entry, bet }: { entry: Token; bet: number }) {
   </svg>;
 }
 
-function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
+/** 规则里赔付表符号的排列：百搭单独一行，其余三个一行（和参考游戏的赔付表排法一致）。 */
+const PAYTABLE_ROWS: readonly (readonly (LineSymbolId | 'WILD')[])[] = [
+  ['WILD'],
+  ['YUANBAO', 'FU_BAG', 'RED_ENVELOPE'],
+  ['COPPER_COIN', 'FIRECRACKER', 'CARROT'],
+];
+
+function RuleSection({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="rabbit-rule-section"><h3>{title}</h3>{children}</section>;
+}
+
+/**
+ * 规则与赔付表（STEP-51）：结构参考用户给的参考游戏规则页——介绍、符号赔付值、奖金符号、玉兔模式、最高赢奖倍数、
+ * 中奖线、按钮说明、附加信息。所有数值直接取自引擎（1.3.0），只写本游戏真实有的功能。
+ */
+function RulesModal({ bet, bets, onClose }: { bet: number; bets: readonly number[]; onClose: () => void }) {
+  const betRange = bets.length ? `${fmt(bets[0])}～${fmt(bets[bets.length - 1])}` : fmt(bet);
+  const allTiers = [...new Set([...MAIN_TIERS, ...MODE_TIERS])].sort((a, b) => a - b);
   return <div className="rabbit-modal-backdrop" role="dialog" aria-modal="true" aria-label="玉兔送财规则与赔付表">
-    <section className="rabbit-modal">
+    <section className="rabbit-modal rabbit-rules">
       <div className="rabbit-modal-heading"><span>玉兔送财</span><button type="button" onClick={onClose} aria-label="关闭规则">×</button></div>
-      <div className="rabbit-rule-tabs"><b>游戏规则</b><b>赔付表</b></div>
-      <p>3-4-3 三列盘面，共 10 条固定中奖线；每线从左到右连成三枚相同普通符号（百搭可替代普通符号，但不能替代奖金牌匾），每线只按最高赔付结算一次。奖金牌匾不参加线奖。</p>
-      <h3 className="rabbit-rule-subtitle">中奖线</h3>
-      <div className="rabbit-payline-grid">{PAYLINES.map((line, index) => <figure key={index} aria-label={`第 ${index + 1} 条中奖线`}>
-        <figcaption>{String(index + 1).padStart(2, '0')}</figcaption>
-        <svg viewBox="0 0 30 40" aria-hidden="true">{BOARD_HEIGHTS.map((rows, x) => Array.from({ length: rows }, (_, y) => {
-          const on = line[x].x === x && line[x].y === y;
-          return <rect key={`${x}-${y}`} className={on ? 'is-on' : ''} x={x * 10 + 1} y={(rows === 4 ? 0 : 5) + y * 10 + 1} width="8" height="8" rx="1.5" />;
-        }))}</svg>
-      </figure>)}</div>
-      <div className="rabbit-paytable">
-        {Object.entries(PAYTABLE).map(([id, multiplier]) => <div key={id}><RabbitSymbol entry={{ symbolId: id as LineSymbolId | 'WILD', stackGroupId: `rules-${id}` }} bet={bet} /><span>{PAYTABLE_LABELS[id]}</span><strong>×{multiplier}</strong><small>= {fmt(Math.round(multiplier * bet / 10))}</small></div>)}
-      </div>
-      <p className="rabbit-rule-note">赔付倍数按「每线投注」计算：每线投注 = 总投注 ÷ 10；按当前总投注 {fmt(bet)}，三连赔付为上面「=」后的数值。</p>
-      <ul>
-        <li>盘面出现 5 个或以上奖金牌匾时，支付所有牌匾数值之和（牌匾数值 = 总投注 × 档位）。主游戏牌匾档位为 {fmtTiers(MAIN_TIERS)}，财富旋转牌匾档位为 {fmtTiers(MODE_TIERS)}。</li>
-        <li>每次付费旋转都有一个独立的小概率触发 8 次财富旋转，与盘面上的牌匾数量无关；财富旋转中只会出现牌匾和空白格，不会再次触发。</li>
-        <li>本轮（含财富旋转）最高赢分为 {fmt(MAX_WIN_MULTIPLIER)} 倍投注；本页面只使用虚拟积分。</li>
-      </ul>
-      <p className="rabbit-rule-note">当前总投注 {fmt(bet)}；牌匾数值由服务器盘面中的档位决定。</p>
+
+      <RuleSection title="游戏规则">
+        <ul>
+          <li>玉兔送财是一个 3 轴（第 1、3 轴 3 行，第 2 轴 4 行）的老虎机游戏，奖金符号最高可达总投注的 {fmt(allTiers[allTiers.length - 1])} 倍。</li>
+          <li>游戏共有 {PAYLINES.length} 条固定中奖线。总投注可选 {betRange} 虚拟积分（{bets.map(fmt).join(' / ')}），每线投注 = 总投注 ÷ {PAYLINES.length}。</li>
+          <li>总投注用画面下方的「−」「+」和「最大投注」设定；「余额」显示平台钱包里可用的虚拟积分。</li>
+          <li>「自动旋转」可以按选择的次数自动进行游戏。</li>
+          <li>中奖组合和奖金按「赔付表」派发：一条中奖线的奖金 = 赔付表上的倍数 × 每线投注。</li>
+          <li>每条中奖线只支付最高的一个奖；中奖线从最左边的卷轴开始，三轴连成才算中奖。</li>
+          <li>不同中奖线上的奖金会叠加。</li>
+          <li>所有赢分都以虚拟积分显示。</li>
+          <li>百搭符号可替代除奖金符号外的所有符号。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="符号赔付值">
+        <div className="rabbit-paytable">
+          {PAYTABLE_ROWS.map((row, index) => <div className="rabbit-paytable-row" key={index}>{row.map((id) => <div className="rabbit-paytable-item" key={id}>
+            <RabbitSymbol entry={{ symbolId: id, stackGroupId: `rules-${id}` }} bet={bet} />
+            <span>{PAYTABLE_LABELS[id]}</span>
+            <strong>{PAYTABLE[id]}</strong>
+            <small>= {fmt(Math.round(PAYTABLE[id] * bet / PAYLINES.length))}</small>
+          </div>)}</div>)}
+        </div>
+        <ul>
+          <li>上面的数字是三连时的「每线投注」倍数；「=」后是按当前总投注 {fmt(bet)} 计算的金额。</li>
+          <li>百搭符号可替代除奖金符号外的所有符号。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="奖金符号">
+        <div className="rabbit-rule-plates">{[MAIN_TIERS[0], MAIN_TIERS[3], MODE_TIERS[MODE_TIERS.length - 1]].map((multiplier) => {
+          const tier = BONUS_MULTIPLIERS.indexOf(multiplier as typeof BONUS_MULTIPLIERS[number]) as BonusTier;
+          return <div className="rabbit-rule-plate" key={multiplier}><RabbitSymbol entry={{ symbolId: 'BONUS_PLATE', bonusTier: tier, stackGroupId: `rules-plate-${tier}` }} bet={bet} /></div>;
+        })}</div>
+        <ul>
+          <li>在任何旋转中，卷轴上都可能出现一个或多个奖金符号。</li>
+          <li>每个奖金符号的价值为总投注的 {fmt(allTiers[0])} 倍至 {fmt(allTiers[allTiers.length - 1])} 倍不等：主游戏可能出现 {fmtTiers(MAIN_TIERS)}，财富旋转中可能出现 {fmtTiers(MODE_TIERS)}。</li>
+          <li>当 5 个或更多奖金符号出现在卷轴上的任意位置时，支付所有奖金符号的价值之和；不足 5 个不派彩。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="玉兔模式">
+        <ul>
+          <li>每次付费旋转都可能随机触发带 {MODE_SPINS} 次财富旋转的玉兔模式，与盘面上有没有奖金符号无关。</li>
+          <li>玉兔模式期间，卷轴上只会出现奖金符号和空白格；财富旋转不扣投注，也不会再次触发玉兔模式。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="最高赢奖倍数">
+        <ul>
+          <li>最高赢分为总投注的 {fmt(MAX_WIN_MULTIPLIER)} 倍。</li>
+          <li>若主游戏和玉兔模式的总赢分达到总投注的 {fmt(MAX_WIN_MULTIPLIER)} 倍，本轮立即结束，剩余的财富旋转不再进行。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="中奖线">
+        <div className="rabbit-payline-grid">{PAYLINES.map((line, index) => <figure key={index} aria-label={`第 ${index + 1} 条中奖线`}>
+          <figcaption>{String(index + 1).padStart(2, '0')}</figcaption>
+          <svg viewBox="0 0 30 40" aria-hidden="true">{BOARD_HEIGHTS.map((rows, x) => Array.from({ length: rows }, (_, y) => {
+            const on = line[x].x === x && line[x].y === y;
+            return <rect key={`${x}-${y}`} className={on ? 'is-on' : ''} x={x * 10 + 1} y={(rows === 4 ? 0 : 5) + y * 10 + 1} width="8" height="8" rx="1.5" />;
+          }))}</svg>
+        </figure>)}</div>
+        <ul>
+          <li>只支付每条中奖线中赢取最高的奖金。</li>
+          <li>中奖线奖金按照从最左至最右卷轴的顺序派发。</li>
+          <li>不同中奖线上的奖金会被叠加。</li>
+        </ul>
+      </RuleSection>
+
+      <RuleSection title="按钮说明">
+        <dl className="rabbit-rule-buttons">
+          <dt><span className="rule-icon is-spin">旋转</span></dt><dd>用当前总投注开始游戏；转动中再点一次（显示「立即停止」）可以马上停下，结果不变。</dd>
+          <dt><span className="rule-icon">空格</span></dt><dd>仅限电脑：按一下空格键旋转；按住空格键会持续旋转，松开即停。</dd>
+          <dt><span className="rule-icon">− / +</span></dt><dd>减少或增加总投注。</dd>
+          <dt><span className="rule-icon">最大投注</span></dt><dd>把总投注设为最高档。</dd>
+          <dt><span className="rule-icon">自动旋转</span></dt><dd>先在「自动」里选次数（5 / 10 / 25 / 50），再点「自动旋转」；进行中按钮显示剩余次数，点它可以停止。余额不足、出错或触发玉兔模式时会自动停下。</dd>
+          <dt><span className="rule-icon">极速</span></dt><dd>打开后缩短卷轴转动的时间，结果不变。</dd>
+          <dt><span className="rule-icon">?</span></dt><dd>打开本页规则与赔付表。</dd>
+          <dt><span className="rule-icon">⌂</span></dt><dd>返回平台大厅。</dd>
+        </dl>
+      </RuleSection>
+
+      <RuleSection title="附加信息">
+        <ul>
+          <li>本游戏是演示平台，只使用虚拟积分，不涉及真实货币。</li>
+          <li>每一局的结果都由游戏服务器决定并记录，画面只是展示；网络中断时以服务器记录为准，赢分会自动到账。</li>
+          <li>每一局都有局号（画面最下方），可以在平台「游戏记录」里打开回放核对。当前规则版本：{MATH_CONFIG_VERSION}。</li>
+          <li>本游戏没有声音和游戏内历史记录按钮；历史记录请到平台大厅的「游戏记录」查看。</li>
+        </ul>
+      </RuleSection>
+
       <button className="rabbit-primary" type="button" onClick={onClose}>知道了</button>
     </section>
   </div>;
@@ -557,7 +649,7 @@ export default function JadeRabbitApp() {
         <p className="rabbit-message">{message}{autoRemaining !== null && autoRef.current > 0 ? ` · 自动剩余 ${autoRemaining}` : ''}</p>
       </section>
       <p className="rabbit-demo-note">演示平台 · 仅虚拟积分 · 不涉及真实货币 · 局号 {busy ? '结算中' : lastRoundId || '—'}</p>
-      {rules && <RulesModal bet={bet} onClose={() => setRules(false)} />}
+      {rules && <RulesModal bet={bet} bets={bets} onClose={() => setRules(false)} />}
     </section>
   </main>;
 }
