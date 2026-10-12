@@ -61,7 +61,7 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-function RabbitMascot({ mood }: { mood: 'idle' | 'spin' | 'win' | 'mode' }) {
+function RabbitMascot({ mood }: { mood: 'idle' | 'spin' | 'win' | 'mode' | 'trigger' | 'finale' }) {
   return <svg className={`rabbit-mascot rabbit-mascot-${mood}`} viewBox="0 0 140 116" role="img" aria-label="原创云耳玉兔吉祥物">
     <path className="rabbit-ear" d="M48 42C21 27 22 3 38 4c15 1 25 18 24 38z" />
     <path className="rabbit-ear rabbit-ear-back" d="M91 37c22-17 39-8 35 6-4 14-21 21-37 18z" />
@@ -153,14 +153,19 @@ export default function JadeRabbitApp() {
   const autoRef = useRef(0);
   const spinRef = useRef<(automatic?: boolean) => void>(() => {});
   const resultBonusWins = useRef<SpinResult['bonusWins']>([]);
+  const bonusCollectNext = useRef<'idle' | 'mode-trigger'>('idle');
+  const presentationRef = useRef(presentation);
   const spaceRepeatRef = useRef<number | null>(null);
   const spaceHeldRef = useRef(false);
   const bets = session?.allowedBets ?? [];
   const inMode = Boolean(freeSpins && freeSpins.remaining > 0);
   const spinning = spinningReels.some(Boolean);
+  presentationRef.current = presentation;
   const mood = presentation === 'mode-finale' || presentation === 'mode-total'
-    ? 'mode'
-    : presentation === 'mode-trigger' || presentation === 'mode-intro' || presentation === 'mode-collect'
+    ? 'finale'
+    : presentation === 'mode-trigger'
+      ? 'trigger'
+      : presentation === 'mode-intro' || presentation === 'mode-collect'
       ? 'mode'
       : busy ? 'spin' : win > 0 ? 'win' : 'idle';
   const resultLineWins = useRef<SpinResult['lineWins']>([]);
@@ -191,6 +196,12 @@ export default function JadeRabbitApp() {
     const timer = window.setInterval(() => { index = (index + 1) % lineWins.length; setActiveLine(lineWins[index]?.lineNumber ?? null); }, 1450);
     return () => window.clearInterval(timer);
   }, [busy, win, board]);
+
+  useEffect(() => {
+    if (presentation !== 'bonus-collect') return;
+    const timer = window.setTimeout(() => setPresentation(bonusCollectNext.current), 1_850);
+    return () => window.clearTimeout(timer);
+  }, [presentation]);
 
   useEffect(() => {
     if (presentation !== 'mode-trigger') return;
@@ -227,6 +238,7 @@ export default function JadeRabbitApp() {
   }
 
   async function spin(automatic = false) {
+    if (presentationRef.current === 'bonus-collect' || presentationRef.current === 'mode-trigger' || presentationRef.current === 'mode-intro' || presentationRef.current === 'mode-collect' || presentationRef.current === 'mode-finale' || presentationRef.current === 'mode-total') return;
     if (busyRef.current) { stopRequested.current = true; setSpinningReels([false, false, false]); setAnticipating(false); setMessage('立即停止，等待服务器结算…'); return; }
     if (!session || rules || error) return;
     if (!automatic && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); setMessage('自动旋转已停止'); return; }
@@ -251,8 +263,8 @@ export default function JadeRabbitApp() {
       if (result.mode === 'free' && result.modeIndex !== undefined) setModeSpinNumber(result.modeIndex + 1);
       if (result.freeSpinsFinished) setModeTotalWin(result.freeSpinsFinished.totalWin);
       if (result.bonusWins && result.bonusWins.length >= 5 && result.mode !== 'free') {
+        bonusCollectNext.current = result.triggered ? 'mode-trigger' : 'idle';
         setPresentation('bonus-collect');
-        window.setTimeout(() => setPresentation(result.triggered ? 'mode-trigger' : 'idle'), 1_850);
       } else if (result.triggered) {
         setPresentation('mode-trigger');
       } else if (result.mode === 'free') {
@@ -302,6 +314,7 @@ export default function JadeRabbitApp() {
       if (event.code !== 'Space' || (event.target as HTMLElement).closest('input, select, textarea, button')) return;
       event.preventDefault();
       if (spaceHeldRef.current) return;
+      if (presentationRef.current === 'bonus-collect' || presentationRef.current === 'mode-trigger' || presentationRef.current === 'mode-intro' || presentationRef.current === 'mode-collect' || presentationRef.current === 'mode-finale' || presentationRef.current === 'mode-total') return;
       spaceHeldRef.current = true;
       spinRef.current();
       spaceRepeatRef.current = window.setInterval(() => {
@@ -326,7 +339,7 @@ export default function JadeRabbitApp() {
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
   const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;
-  const displayBoard = presentation === 'mode-intro' || presentation === 'mode-finale' || presentation === 'mode-total'
+  const displayBoard = presentation === 'mode-spin' || presentation === 'mode-intro' || presentation === 'mode-finale' || presentation === 'mode-total'
     ? modeBlankBoard
     : board;
   const rollingSeeds = (inMode ? modeBlankBoard : board).map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
