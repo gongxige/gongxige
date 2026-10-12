@@ -11,6 +11,8 @@ import {
   type SymbolId,
   type Token,
 } from './engine/index.ts';
+import { openingBoard } from './openingBoard.ts';
+import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
 
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number } | null;
 type Session = { playerName: string; gameId: string; allowedBets?: number[]; credits: number; freeSpins: FreeSpins };
@@ -42,11 +44,7 @@ const token = new URLSearchParams(location.search).get('token') ?? '';
 const fmt = (value: number) => value.toLocaleString('zh-CN');
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const EMPTY_TOKEN: Token = { symbolId: 'BLANK', stackGroupId: 'empty' };
-const EMPTY_BOARD: Board = [
-  [EMPTY_TOKEN, EMPTY_TOKEN, EMPTY_TOKEN],
-  [EMPTY_TOKEN, EMPTY_TOKEN, EMPTY_TOKEN, EMPTY_TOKEN],
-  [EMPTY_TOKEN, EMPTY_TOKEN, EMPTY_TOKEN],
-];
+
 const PAYTABLE_LABELS: Record<string, string> = {
   WILD: '玉云百搭', YUANBAO: '元宝', FU_BAG: '福袋', RED_ENVELOPE: '红包',
   COPPER_COIN: '铜钱', FIRECRACKER: '鞭炮', CARROT: '胡萝卜',
@@ -79,6 +77,7 @@ function RabbitMascot({ mood }: { mood: 'idle' | 'spin' | 'win' | 'mode' | 'trig
 
 function RabbitSymbol({ entry, bet }: { entry: Token; bet: number }) {
   const id = entry.symbolId;
+  const localSrc = useLocalSymbolSrc(id);
   if (id === 'BONUS_PLATE') {
     const tier = entry.bonusTier ?? 0;
     const value = Math.round(BONUS_MULTIPLIERS[tier] * bet);
@@ -91,6 +90,7 @@ function RabbitSymbol({ entry, bet }: { entry: Token; bet: number }) {
     </svg>;
   }
   if (id === 'BLANK') return <svg className="rabbit-symbol" viewBox="0 0 120 88" aria-label="空白格"><path className="blank-knot" d="M60 17c-17 0-25 15-9 22-16 7-8 22 9 22s25-15 9-22c16-7 8-22-9-22zM60 61v13M52 70h16" /></svg>;
+  if (localSrc) return <img className={`rabbit-symbol rabbit-symbol-image symbol-${id.toLowerCase()}`} src={localSrc} alt={PAYTABLE_LABELS[id] ?? id} draggable={false} onError={() => markLocalSymbolFailed(id)} />;
   return <svg className={`rabbit-symbol symbol-${id.toLowerCase()}`} viewBox="0 0 120 88" aria-label={PAYTABLE_LABELS[id] ?? id}>
     {id === 'WILD' && <><path className="wild-cloud" d="M24 55c-10-15 4-28 18-24 3-19 31-22 39-4 19-6 34 14 22 28-6 7-17 9-28 8H40c-8 0-13-3-16-8z" /><path className="wild-swirl" d="M50 44q21-15 23 4-1 14-19 7" /></>}
     {id === 'YUANBAO' && <><path className="yuanbao" d="M22 38c5-13 18-20 38-20s33 7 38 20l-9 27c-11 10-47 10-58 0z" /><path className="yuanbao-top" d="M30 38q30 12 60 0l-5-11H35z" /><circle cx="50" cy="36" r="3" /><circle cx="70" cy="36" r="3" /></>}
@@ -129,7 +129,7 @@ function RollingColumn({ height, bet, seed }: { height: number; bet: number; see
 
 export default function JadeRabbitApp() {
   const [session, setSession] = useState<Session | null>(null);
-  const [board, setBoard] = useState<Board>(EMPTY_BOARD);
+  const [board, setBoard] = useState<Board>(() => openingBoard());
   const [spinningReels, setSpinningReels] = useState<boolean[]>([false, false, false]);
   const [anticipating, setAnticipating] = useState(false);
   const [credits, setCredits] = useState(0);
@@ -154,6 +154,8 @@ export default function JadeRabbitApp() {
   const spinRef = useRef<(automatic?: boolean) => void>(() => {});
   const resultBonusWins = useRef<SpinResult['bonusWins']>([]);
   const bonusCollectNext = useRef<'idle' | 'mode-trigger'>('idle');
+  // 最近一局付费旋转的盘面：玉兔模式结束后回到主游戏时恢复它，主游戏里不再留空白格。
+  const mainBoardRef = useRef<Board | null>(null);
   const presentationRef = useRef(presentation);
   const spaceRepeatRef = useRef<number | null>(null);
   const spaceHeldRef = useRef(false);
@@ -174,6 +176,8 @@ export default function JadeRabbitApp() {
     return new Set((line?.coordinates ?? []).map(({ x, y }) => `${x}-${y}`));
   }, [activeLine, board]);
   const canAdjustBet = !busy && !inMode && autoRef.current === 0;
+
+  useEffect(() => { preloadLocalSymbols(); }, []);
 
   useEffect(() => {
     if (!token) { setError('请从平台大厅进入玉兔送财。'); return; }
@@ -225,6 +229,17 @@ export default function JadeRabbitApp() {
     return () => window.clearTimeout(timer);
   }, [presentation]);
 
+  useEffect(() => {
+    if (presentation !== 'mode-total') return;
+    const timer = window.setTimeout(() => {
+      resultLineWins.current = [];
+      resultBonusWins.current = [];
+      setBoard(mainBoardRef.current ?? openingBoard());
+      setPresentation('idle');
+    }, 3_000);
+    return () => window.clearTimeout(timer);
+  }, [presentation]);
+
   async function animateResult(result: SpinResult, startedAt: number) {
     if (stopRequested.current) return;
     const totalWait = fast ? 420 : 690;
@@ -262,6 +277,7 @@ export default function JadeRabbitApp() {
       if (result.gameId !== 'jade-rabbit') throw new Error('服务器返回了不匹配的游戏盘面。');
       await animateResult(result, startedAt);
       setSpinningReels([false, false, false]); setAnticipating(false); setBoard(result.grid);
+      if (result.mode === 'paid') mainBoardRef.current = result.grid;
       if (result.credits !== null) setCredits(result.credits);
       setBet(result.bet); setWin(result.payout); setFreeSpins(result.freeSpins); resultLineWins.current = result.lineWins ?? [];
       resultBonusWins.current = result.bonusWins ?? [];

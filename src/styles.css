@@ -415,3 +415,6 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 @keyframes rabbit-trigger-leap { 0%, 100% { transform: translateX(-50%) translateY(0) rotate(0); } 35% { transform: translateX(-50%) translateY(-6cqw) rotate(-5deg); } 58% { transform: translateX(-50%) translateY(-4cqw) rotate(5deg); } }
 @keyframes rabbit-finale-celebrate { 0%, 100% { transform: translateX(-50%) rotate(0) translateY(0); } 25% { transform: translateX(-50%) rotate(-12deg) translateY(-1cqw); } 55% { transform: translateX(-50%) rotate(360deg) translateY(-4cqw); } 78% { transform: translateX(-50%) rotate(350deg) translateY(0); } }
 @keyframes rabbit-tail-open { from { transform: rotate(0) scale(.85); } to { transform: rotate(28deg) scale(1.15); } }
+/* 阶段 12：玉兔送财本机符号图（320×320 透明 PNG），缺图时仍显示上面的 SVG */
+.rabbit-symbol-image { display: block; object-fit: contain; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.rabbit-cell > .rabbit-symbol-image { position: absolute; inset: 0; width: 100%; height: 100%; }
