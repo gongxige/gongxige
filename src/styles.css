@@ -419,3 +419,46 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-symbol-image { display: block; object-fit: contain; user-select: none; -webkit-user-drag: none; pointer-events: none; }
 .rabbit-reel-column > .rabbit-cell > .rabbit-symbol-image { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rabbit-rolling-track .rabbit-symbol-image { height: auto; aspect-ratio: 120 / 88; }
+/* 阶段 12 / STEP-46：本机背景图（931×1230）铺在标题栏和控制栏之间，按 layout.json 的百分比摆放卷轴、提示条和吉祥物；缺图时不加 has-art，仍是上面自己画的画面 */
+.rabbit-stage.has-art { overflow: clip; container-type: size; background: #120b12; --art-top: max(44px, 7cqh); --art-bottom: max(150px, 19cqh); --art-w: min(100cqw, calc((100cqh - var(--art-top) - var(--art-bottom)) * var(--art-ratio))); --art-h: calc(var(--art-w) / var(--art-ratio)); }
+.rabbit-stage.has-art.is-mode { background: #120b12; }
+.has-art .rabbit-header { height: var(--art-top); }
+.rabbit-art { position: absolute; top: var(--art-top); left: 50%; z-index: 2; width: var(--art-w); height: var(--art-h); transform: translateX(-50%); container-type: inline-size; background: #2a1033 center / 100% 100% no-repeat; box-shadow: 0 0 3cqw #000c; }
+.rabbit-art-mascot, .rabbit-art-banner, .rabbit-art-reel, .rabbit-art-bar { position: absolute; }
+.rabbit-art-mascot { z-index: 3; pointer-events: none; }
+.rabbit-art-mascot .rabbit-mascot { bottom: 4%; width: 78%; }
+.rabbit-art-banner, .rabbit-art-bar { z-index: 4; display: grid; place-items: center; overflow: hidden; color: #ffe590; font: 900 3.4cqw/1.1 "KaiTi", "STKaiti", "Microsoft YaHei", serif; text-align: center; white-space: nowrap; text-shadow: 0 .35cqw 0 #6a1426, 0 0 1.4cqw #3a0a2a, 0 0 .5cqw #000; }
+.rabbit-art-bar { font-size: 4.2cqw; }
+.rabbit-art-banner span, .rabbit-art-bar span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.rabbit-art-reel { z-index: 2; display: flex; }
+.has-art .rabbit-reel-column { flex: 1; height: 100%; gap: 0; border-radius: .6cqw; background: linear-gradient(180deg, #24205c, #19164a 50%, #221d58); box-shadow: inset 0 0 2cqw #07052299; }
+.has-art .rabbit-reel-column::after { display: none; }
+.has-art.is-mode .rabbit-reel-column { background: #8f1420; box-shadow: inset 0 0 2cqw #3d040c; }
+.has-art .rabbit-line-layer { z-index: 3; }
+.has-art .rabbit-line-layer polyline { stroke-width: 9; }
+.has-art .rabbit-bottom { top: calc(var(--art-top) + var(--art-h)); height: auto; bottom: 0; display: flex; flex-direction: column; justify-content: flex-start; gap: 1.2cqh; padding-top: 1.6cqh; }
+.has-art .rabbit-stats { height: auto; min-height: 9cqw; flex: none; }
+.has-art .rabbit-controls { height: auto; min-height: 10cqw; flex: none; }
+.has-art .rabbit-message { height: auto; flex: none; }
+/* 本机奖金牌匾底图：数值写在中间 */
+.rabbit-plate-image { position: relative; display: grid; place-items: center; }
+.rabbit-plate-image img { position: absolute; inset: 4%; width: 92%; height: 92%; object-fit: contain; }
+.rabbit-plate-image b { position: relative; color: #7a2a08; font: 900 clamp(10px, 4.2cqw, 40px)/1 Georgia, "Microsoft YaHei", serif; text-shadow: 0 .15cqw 0 #fff3b8, 0 0 .5cqw #fff5c0; }
+.rabbit-plate-image.is-big b { color: #d63fbf; text-shadow: 0 .15cqw 0 #fff0fa, 0 0 .7cqw #ffd6f6; }
+.rabbit-paytable .rabbit-plate-image b { font-size: 1.6cqw; }
+.rabbit-knot-image { object-fit: cover; }
+@media (max-height: 520px) and (orientation: landscape) {
+  .rabbit-stage.has-art { --art-top: 15cqh; --art-bottom: 0px; }
+  .has-art .rabbit-bottom { top: var(--art-top); left: calc(50% + var(--art-w) / 2 + 1.5%); right: 1.5%; bottom: 4%; height: auto; padding: 1cqh 0; border: 0; background: none; }
+  .has-art .rabbit-stats { position: static; width: 100%; height: auto; min-height: 16cqh; }
+  .has-art .rabbit-controls { margin-left: 0; flex-wrap: wrap; justify-content: center; gap: 1.6cqh; }
+  .has-art .rabbit-bet-controls { height: auto; }
+  .has-art .rabbit-bet-controls button, .has-art .rabbit-max, .has-art .rabbit-fast, .has-art .rabbit-auto-start, .has-art .rabbit-auto-stop, .has-art .rabbit-auto select { min-height: 10cqh; font-size: 3.6cqh; }
+  .has-art .rabbit-bet-controls button { width: 10cqh; font-size: 6cqh; }
+  .has-art .rabbit-bet-controls span { min-width: 18cqh; font-size: 4cqh; }
+  .has-art .rabbit-auto { font-size: 3.4cqh; }
+  .has-art .rabbit-spin { flex: 1 1 100%; min-width: 0; height: 15cqh; font-size: 6.5cqh; }
+  .has-art .rabbit-stats span { font-size: 3.2cqh; }
+  .has-art .rabbit-stats strong { font-size: 5cqh; }
+  .has-art .rabbit-message { position: static; font-size: 3.2cqh; }
+}

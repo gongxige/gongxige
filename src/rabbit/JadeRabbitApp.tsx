@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   BOARD_HEIGHTS,
   BONUS_MULTIPLIERS,
@@ -11,6 +11,8 @@ import {
   type SymbolId,
   type Token,
 } from './engine/index.ts';
+import { cellCenter, rectToPercent, type ArtLayout } from './artLayout.ts';
+import { markLocalArtFailed, preloadLocalArt, useLocalArt } from './localArt.ts';
 import { openingBoard } from './openingBoard.ts';
 import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
 
@@ -78,9 +80,15 @@ function RabbitMascot({ mood }: { mood: 'idle' | 'spin' | 'win' | 'mode' | 'trig
 function RabbitSymbol({ entry, bet }: { entry: Token; bet: number }) {
   const id = entry.symbolId;
   const localSrc = useLocalSymbolSrc(id);
+  const art = useLocalArt();
   if (id === 'BONUS_PLATE') {
     const tier = entry.bonusTier ?? 0;
     const value = Math.round(BONUS_MULTIPLIERS[tier] * bet);
+    // 本机牌匾底图：数值写在牌匾中间，×20 及以上的大数值用粉紫色字。
+    if (art.bonusPlate) return <span className={`rabbit-symbol rabbit-plate-image ${BONUS_MULTIPLIERS[tier] >= 20 ? 'is-big' : ''}`} role="img" aria-label={`奖金牌匾 ${value}`}>
+      <img src={art.bonusPlate} alt="" draggable={false} onError={() => markLocalArtFailed('bonusPlate')} />
+      <b>{fmt(value)}</b>
+    </span>;
     return <svg className="rabbit-symbol rabbit-bonus-symbol" viewBox="0 0 120 88" aria-label={`奖金牌匾 ${value}`}>
       <path className="bonus-ribbon" d="M10 18 18 9h84l8 9v52l-8 9H18l-8-9z" />
       <path className="bonus-rim" d="M16 21 22 15h76l6 6v46l-6 6H22l-6-6z" />
@@ -89,6 +97,7 @@ function RabbitSymbol({ entry, bet }: { entry: Token; bet: number }) {
       <text x="60" y="63" className="bonus-value" textAnchor="middle">{fmt(value)}</text>
     </svg>;
   }
+  if (id === 'BLANK' && art.knotTile) return <img className="rabbit-symbol rabbit-symbol-image rabbit-knot-image" src={art.knotTile} alt="空白格" draggable={false} onError={() => markLocalArtFailed('knotTile')} />;
   if (id === 'BLANK') return <svg className="rabbit-symbol" viewBox="0 0 120 88" aria-label="空白格"><path className="blank-knot" d="M60 17c-17 0-25 15-9 22-16 7-8 22 9 22s25-15 9-22c16-7 8-22-9-22zM60 61v13M52 70h16" /></svg>;
   if (localSrc) return <img className={`rabbit-symbol rabbit-symbol-image symbol-${id.toLowerCase()}`} src={localSrc} alt={PAYTABLE_LABELS[id] ?? id} draggable={false} onError={() => markLocalSymbolFailed(id)} />;
   return <svg className={`rabbit-symbol symbol-${id.toLowerCase()}`} viewBox="0 0 120 88" aria-label={PAYTABLE_LABELS[id] ?? id}>
@@ -177,7 +186,7 @@ export default function JadeRabbitApp() {
   }, [activeLine, board]);
   const canAdjustBet = !busy && !inMode && autoRef.current === 0;
 
-  useEffect(() => { preloadLocalSymbols(); }, []);
+  useEffect(() => { preloadLocalSymbols(); preloadLocalArt(); }, []);
 
   useEffect(() => {
     if (!token) { setError('请从平台大厅进入玉兔送财。'); return; }
@@ -356,6 +365,11 @@ export default function JadeRabbitApp() {
     };
   }, []);
 
+  const localArt = useLocalArt();
+  const layout: ArtLayout | null = localArt.layout && localArt.bgMain ? localArt.layout : null;
+  const modeLook = inMode || presentation.startsWith('mode-');
+  const artBackground = modeLook ? localArt.bgMode ?? localArt.bgMain : localArt.bgMain;
+  const artLinePath = layout && activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => { const point = cellCenter(layout, x, y, BOARD_HEIGHTS[x]); return `${point.x},${point.y}`; }).join(' ') : '';
   const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
@@ -366,14 +380,27 @@ export default function JadeRabbitApp() {
   const rollingSeeds = (inMode ? modeBlankBoard : board).map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
   const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
 
+  const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
+    {spinningReels[x] ? <RollingColumn height={BOARD_HEIGHTS[x]} bet={bet} seed={rollingSeeds[x]} /> : column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
+  </div>;
+  const topBannerText = modeLook ? infoItems[0] : infoItems[tickerIndex];
+  const bottomBarText = win > 0 && !busy ? `赢得 ${fmt(win)}` : modeLook ? (inMode ? `玉兔模式！剩余 ${freeSpins!.remaining} 次` : '玉兔模式！') : infoItems[(tickerIndex + 1) % infoItems.length];
+
   return <main className="rabbit-shell">
-    <section className={`rabbit-stage ${inMode || presentation.startsWith('mode-') ? 'is-mode' : ''} ${presentation} ${spinning ? 'is-spinning' : ''}`} aria-label="玉兔送财游戏画面">
-      <div className="rabbit-sky"><span /><span /><span /><span /></div>
+    <section className={`rabbit-stage ${modeLook ? 'is-mode' : ''} ${presentation} ${spinning ? 'is-spinning' : ''} ${layout ? 'has-art' : ''}`} style={layout ? { '--art-ratio': layout.imageSize.width / layout.imageSize.height } as CSSProperties : undefined} aria-label="玉兔送财游戏画面">
+      {!layout && <div className="rabbit-sky"><span /><span /><span /><span /></div>}
       <header className="rabbit-header">
         <a className="rabbit-home" href="/" aria-label="返回大厅">⌂</a>
         <div className="rabbit-title"><b>玉兔送财</b><small>JADE RABBIT · 虚拟积分演示</small></div>
         <button className="rabbit-info-button" type="button" onClick={() => setRules(true)} aria-label="打开规则与赔付表">?</button>
       </header>
+      {layout ? <div className="rabbit-art" style={{ backgroundImage: `url("${artBackground}")` }}>
+        <div className="rabbit-art-mascot" style={rectToPercent(layout.mascotArea, layout)}><RabbitMascot mood={mood} /></div>
+        <div className="rabbit-art-banner" style={rectToPercent(layout.topBanner, layout)} role="status"><span>{topBannerText}</span></div>
+        {displayBoard.map((column, x) => <div className="rabbit-art-reel" style={rectToPercent(layout.reels[x], layout)} key={x}>{reelColumn(column, x)}</div>)}
+        <svg className="rabbit-line-layer" viewBox={`0 0 ${layout.imageSize.width} ${layout.imageSize.height}`} preserveAspectRatio="none" aria-hidden="true">{artLinePath && <polyline points={artLinePath} />}</svg>
+        <div className="rabbit-art-bar" style={rectToPercent(layout.bottomBar, layout)} role="status"><span>{bottomBarText}</span></div>
+      </div> : <>
       <div className="rabbit-roof" aria-hidden="true">
         <div className="roof-tile roof-tile-left" /><div className="roof-tile roof-tile-center" /><div className="roof-tile roof-tile-right" />
         <div className="roof-crest">福</div><RabbitMascot mood={mood} />
@@ -383,21 +410,20 @@ export default function JadeRabbitApp() {
       <div className="rabbit-machine">
         <div className="rabbit-line-rail left">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
         <div className="rabbit-reels" aria-label="3-4-3 服务器盘面">
-          {displayBoard.map((column, x) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
-            {spinningReels[x] ? <RollingColumn height={BOARD_HEIGHTS[x]} bet={bet} seed={rollingSeeds[x]} /> : column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
-          </div>)}
+          {displayBoard.map((column, x) => reelColumn(column, x))}
           <svg className="rabbit-line-layer" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">{linePath && <polyline points={linePath} />}</svg>
         </div>
         <div className="rabbit-line-rail right">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
       </div>
+      </>}
       {presentation === 'bonus-collect' && <div className="rabbit-bonus-callout" role="status"><b>奖金牌一起发光</b><strong>{fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</strong></div>}
       {presentation === 'mode-trigger' && <div className="rabbit-mode-overlay rabbit-mode-trigger" role="status"><b>玉兔送财</b><span>触发财富旋转</span></div>}
       {presentation === 'mode-intro' && <div className="rabbit-mode-overlay rabbit-mode-intro" role="status"><b>8 次财富旋转</b><span>好运已经起航</span></div>}
       {presentation === 'mode-collect' && <div className="rabbit-mode-overlay rabbit-mode-collect" role="status"><b>第 {modeSpinNumber} 次收集</b><span>赢得 {fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</span></div>}
       {presentation === 'mode-finale' && <div className="rabbit-mode-overlay rabbit-mode-finale" role="status"><b>大奖</b><span>金币雨 · {fmt(modeTotalWin)}</span><i>{Array.from({ length: 18 }, (_, index) => <em key={index}>◆</em>)}</i></div>}
       {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>共赢得 {fmt(modeTotalWin)}</b><span>财富旋转结束</span></div>}
-      <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>
-      {inMode && <div className="rabbit-mode-badge">财富旋转 · 剩余 {freeSpins!.remaining} 次</div>}
+      {!layout && <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>}
+      {inMode && !layout && <div className="rabbit-mode-badge">财富旋转 · 剩余 {freeSpins!.remaining} 次</div>}
       {error && <div className="rabbit-error" role="alert">{error} <a href="/">返回大厅</a></div>}
       <section className="rabbit-bottom" aria-label="游戏控制区">
         <div className="rabbit-stats"><div><span>余额</span><strong>{fmt(credits)}</strong></div><div><span>投注</span><strong className="bet-number">{fmt(bet)}</strong></div><div><span>赢分</span><strong>{fmt(win)}</strong></div></div>
