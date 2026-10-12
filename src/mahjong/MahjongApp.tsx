@@ -23,6 +23,8 @@ export const MJ_FIRST_STOP_MS = 600;
 /** A round paying at least this many times the bet gets the big-win screen. */
 export const MJ_BIG_WIN_MULTIPLE = 20;
 export const MJ_OVERLAY_MS = 2400;
+/** Free spins play by themselves: pause between them, longer after a win so it can be seen. */
+export const MJ_FREE_SPIN_DELAY_MS = { win: 1500, noWin: 700 } as const;
 type Overlay = { kind: 'free-start' | 'free-end' | 'big-win'; title: string; amount?: number } | null;
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
@@ -80,7 +82,8 @@ export default function MahjongApp() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const overlayDone = useRef<() => void>(() => {});
   const busy = useRef(false);
-  const [, force] = useState(0);
+  const [tick, force] = useState(0);
+  const lastWin = useRef(0);
   const bets = session?.allowedBets ?? [];
 
   useEffect(() => {
@@ -119,7 +122,7 @@ export default function MahjongApp() {
         setWin(frame.runningWin);
         if (frame.holdMs) await new Promise((r) => setTimeout(r, frame.holdMs));
       }
-      setWin(result.payout);
+      setWin(result.payout); lastWin.current = result.payout;
       const showOverlay = (o: Overlay) => new Promise<void>((resolve) => { overlayDone.current = resolve; setOverlay(o); setTimeout(() => { setOverlay(null); resolve(); }, MJ_OVERLAY_MS); });
       if (result.payout >= MJ_BIG_WIN_MULTIPLE * result.bet) await showOverlay({ kind: 'big-win', title: result.payout >= 100 * result.bet ? '超级大奖' : '大奖', amount: result.payout });
       if (result.freeSpinsAwarded > 0) await showOverlay({ kind: 'free-start', title: `${result.huCount} 个"胡"！${result.mode === 'free' ? '追加' : '获得'} ${result.freeSpinsAwarded} 次免费旋转` });
@@ -138,6 +141,13 @@ export default function MahjongApp() {
       api<Session>(`/api/session?token=${encodeURIComponent(token)}`).then((s) => setCredits(s.credits)).catch(() => undefined);
     } finally { busy.current = false; force((n) => n + 1); }
   }
+
+  // Free spins run on their own (also after reloading mid-feature); the spin button can still start the next one early.
+  useEffect(() => {
+    if (!inFree || busy.current || overlay || rules || error) return;
+    const timer = setTimeout(() => spinRef.current(), lastWin.current > 0 ? MJ_FREE_SPIN_DELAY_MS.win : MJ_FREE_SPIN_DELAY_MS.noWin);
+    return () => clearTimeout(timer);
+  }, [inFree, freeSpins, overlay, rules, error, tick]);
 
   // Space bar spins, like Wild Frontier.
   const spinRef = useRef(spin); spinRef.current = spin;
