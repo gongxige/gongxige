@@ -323,7 +323,7 @@ function handleRoundLookup(raw, req, res) {
     if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
     const gameId = round.gameId ?? 'wild-frontier';
     const replayed = gameId === 'mahjong-cascade'
-      ? replayMahjongSpin(round.replayInput)
+      ? replayMahjongSpin({ ...round.replayInput, mathConfigVersion: round.mathConfigVersion })
       : replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
     const expectedVersion = gameId === 'mahjong-cascade' ? 'mahjong-engine-1.2.0' : ENGINE_VERSION;
     return json(res, 200, { round, replay: { gameId, payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, cascadeSteps: gameId === 'mahjong-cascade' ? replayed.cascadeSteps : undefined, matches: replayed.payout === round.payout && round.engineVersion === expectedVersion } });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BOARD_HEIGHTS, MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER, boardFromStops, evaluateWays, freeSpinsForHu, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PaidSymbolId, type PayTable, type Token } from './index.ts';
+import { BOARD_HEIGHTS, MAHJONG_MATH_CONFIG, MAHJONG_MATH_CONFIG_V1, MAHJONG_MATH_CONFIG_V2, MAX_WIN_MULTIPLIER, boardFromStops, evaluateWays, freeSpinsForHu, mathConfigForVersion, multiplierForCascade, replaySpin, settleFreeSpin, settleSpin, type PaidSymbolId, type PayTable, type Token } from './index.ts';
 
 const token = (symbolId: Token['symbolId']): Token => ({ symbolId });
 const payTable: PayTable = { FA: { 3: 10 }, ZHONG: { 3: 20 } };
@@ -144,5 +144,41 @@ describe('麻将连连胡 STEP-25 特殊牌、免费旋转与封顶引擎', () =
       assert.equal(Number.isInteger(total), true);
       assert.ok(total <= 10_000 * MAX_WIN_MULTIPLIER);
     }
+  });
+
+  it('第 2 版在五个投注档位的大量随机完整回合中始终整数结算', () => {
+    let seed = 0x33_10_2026;
+    const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
+    for (const bet of [100, 200, 500, 1_000, 2_000]) for (let index = 0; index < 500; index += 1) {
+      let outcome = settleSpin([next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], bet, MAHJONG_MATH_CONFIG_V2.strips, MAHJONG_MATH_CONFIG_V2.payTable);
+      let total = outcome.payout; let remaining = outcome.freeSpinsAwarded;
+      for (const step of outcome.cascadeSteps) for (const win of step.wins) { assert.equal(Number.isInteger(win.basePayout), true); assert.equal(Number.isInteger(win.payout), true); }
+      while (remaining > 0 && !outcome.capped) {
+        const settled = settleFreeSpin({ bet, remaining, parentTotalWin: total, capped: false }, [next() % 100, next() % 100, next() % 100, next() % 100, next() % 100], MAHJONG_MATH_CONFIG_V2.strips, MAHJONG_MATH_CONFIG_V2.payTable);
+        outcome = settled.outcome; total += outcome.payout; remaining = settled.state?.remaining ?? 0;
+        for (const step of outcome.cascadeSteps) for (const win of step.wins) { assert.equal(Number.isInteger(win.basePayout), true); assert.equal(Number.isInteger(win.payout), true); }
+      }
+      assert.equal(Number.isInteger(total), true); assert.ok(total <= bet * MAX_WIN_MULTIPLIER);
+    }
+  });
+
+  it('第 2 版九种牌都有百分比赔付，低档五列每路至少为投注的 1%', () => {
+    const low: readonly PaidSymbolId[] = ['DOT2', 'DOT3', 'BAM1', 'BAM2'];
+    for (const symbolId of ['FA', 'ZHONG', 'BAI', 'WAN8', 'DOT1', ...low] as const) for (const run of [3, 4, 5] as const) {
+      const multiplier = MAHJONG_MATH_CONFIG_V2.payTable[symbolId]?.[run];
+      assert.ok(multiplier && typeof multiplier !== 'number'); assert.equal(multiplier.denominator, 100); assert.ok(multiplier.numerator > 0);
+    }
+    for (const symbolId of low) {
+      const multiplier = MAHJONG_MATH_CONFIG_V2.payTable[symbolId]?.[5]! as { numerator: number; denominator: number };
+      assert.ok(multiplier.numerator / multiplier.denominator >= 0.01);
+    }
+  });
+
+  it('第 1 版记录按记录版本回放，与原局逐项完全一致', () => {
+    const input = { mode: 'paid' as const, bet: 10_000, stops: [7, 19, 31, 43, 57] as const, capRemainingBefore: 10_000 * MAX_WIN_MULTIPLIER, mathConfigVersion: MAHJONG_MATH_CONFIG_V1.version };
+    const original = settleSpin(input.stops, input.bet, MAHJONG_MATH_CONFIG_V1.strips, MAHJONG_MATH_CONFIG_V1.payTable, input);
+    assert.deepEqual(replaySpin(input), original);
+    assert.equal(mathConfigForVersion(input.mathConfigVersion), MAHJONG_MATH_CONFIG_V1);
+    assert.throws(() => mathConfigForVersion('missing-math-version'), /规则版本不可用/);
   });
 });

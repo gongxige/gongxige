@@ -22,7 +22,7 @@ export interface MahjongMathConfig {
 export type SpinMode = 'paid' | 'free';
 export interface WaysWin { readonly symbolId: PaidSymbolId; readonly run: 3 | 4 | 5; readonly ways: number; readonly basePayout: number; readonly cascadeMultiplier: number; readonly payout: number; readonly cells: readonly Coordinate[]; }
 export interface CascadeStep { readonly beforeBoard: Board; readonly afterBoard: Board; readonly wins: readonly WaysWin[]; readonly cascadeMultiplier: number; readonly candidatePayout: number; readonly payout: number; readonly capped: boolean; readonly goldenTransforms: readonly Coordinate[]; readonly removed: readonly Coordinate[]; readonly refills: readonly (readonly Token[])[]; }
-export interface ReplayInput { readonly mode: SpinMode; readonly bet: number; readonly stops: Stops; readonly capRemainingBefore: number; }
+export interface ReplayInput { readonly mode: SpinMode; readonly bet: number; readonly stops: Stops; readonly capRemainingBefore: number; readonly mathConfigVersion?: string; }
 export interface SpinOutcome { readonly stops: Stops; readonly mode: SpinMode; readonly initialBoard: Board; readonly cascadeSteps: readonly CascadeStep[]; readonly finalBoard: Board; readonly payout: number; readonly capped: boolean; readonly capRemainingAfter: number; readonly huCount: number; readonly freeSpinsAwarded: number; readonly replayInput: ReplayInput; }
 export interface FreeSpinState { readonly bet: number; readonly remaining: number; readonly parentTotalWin: number; readonly capped: boolean; }
 
@@ -43,7 +43,8 @@ function createStrip(seed: number, reel: number): readonly Token[] {
     return reel >= 1 && reel <= 3 && index % 20 === (seed % 20) ? { ...token, golden: true } : token;
   });
 }
-export const MAHJONG_MATH_CONFIG: MahjongMathConfig = {
+/** 已停用的第 1 版；只读保留，用于历史局回放。 */
+export const MAHJONG_MATH_CONFIG_V1: MahjongMathConfig = {
   version: 'mahjong-math-1.2.0', stripRevision: 'mahjong-strips-1.2.0',
   strips: [createStrip(0x1a2b3c01, 0), createStrip(0x1a2b3c02, 1), createStrip(0x1a2b3c03, 2), createStrip(0x1a2b3c04, 3), createStrip(0x1a2b3c05, 4)],
   payTable: {
@@ -58,8 +59,36 @@ export const MAHJONG_MATH_CONFIG: MahjongMathConfig = {
     BAM2: { 3: { numerator: 2, denominator: 10_000 }, 4: { numerator: 5, denominator: 10_000 }, 5: { numerator: 18, denominator: 10_000 } },
   },
 };
-export const TEMPORARY_STRIPS = MAHJONG_MATH_CONFIG.strips;
-export const TEMPORARY_PAY_TABLE = MAHJONG_MATH_CONFIG.payTable;
+/** 第 2 版：全部每路派彩均是投注的整数百分比。 */
+export const MAHJONG_MATH_CONFIG_V2: MahjongMathConfig = {
+  version: 'mahjong-math-2.0.0', stripRevision: 'mahjong-strips-2.0.0',
+  // 轴带 token 与第 1 版一致；新 revision 明确它属于第 2 版不可变配置。
+  strips: [createStrip(0x1a2b3c01, 0), createStrip(0x1a2b3c02, 1), createStrip(0x1a2b3c03, 2), createStrip(0x1a2b3c04, 3), createStrip(0x1a2b3c05, 4)],
+  payTable: {
+    FA: { 3: { numerator: 11, denominator: 100 }, 4: { numerator: 33, denominator: 100 }, 5: { numerator: 132, denominator: 100 } },
+    ZHONG: { 3: { numerator: 11, denominator: 100 }, 4: { numerator: 33, denominator: 100 }, 5: { numerator: 132, denominator: 100 } },
+    BAI: { 3: { numerator: 11, denominator: 100 }, 4: { numerator: 33, denominator: 100 }, 5: { numerator: 132, denominator: 100 } },
+    WAN8: { 3: { numerator: 6, denominator: 100 }, 4: { numerator: 18, denominator: 100 }, 5: { numerator: 79, denominator: 100 } },
+    DOT1: { 3: { numerator: 6, denominator: 100 }, 4: { numerator: 18, denominator: 100 }, 5: { numerator: 79, denominator: 100 } },
+    DOT2: { 3: { numerator: 1, denominator: 100 }, 4: { numerator: 3, denominator: 100 }, 5: { numerator: 12, denominator: 100 } },
+    DOT3: { 3: { numerator: 1, denominator: 100 }, 4: { numerator: 3, denominator: 100 }, 5: { numerator: 12, denominator: 100 } },
+    BAM1: { 3: { numerator: 1, denominator: 100 }, 4: { numerator: 3, denominator: 100 }, 5: { numerator: 12, denominator: 100 } },
+    BAM2: { 3: { numerator: 1, denominator: 100 }, 4: { numerator: 3, denominator: 100 }, 5: { numerator: 12, denominator: 100 } },
+  },
+};
+export const MAHJONG_MATH_CONFIGS: Readonly<Record<string, MahjongMathConfig>> = Object.freeze({
+  [MAHJONG_MATH_CONFIG_V1.version]: MAHJONG_MATH_CONFIG_V1,
+  [MAHJONG_MATH_CONFIG_V2.version]: MAHJONG_MATH_CONFIG_V2,
+});
+export function mathConfigForVersion(version: string): MahjongMathConfig {
+  const config = MAHJONG_MATH_CONFIGS[version];
+  if (!config) throw new Error(`规则版本不可用：${version}`);
+  return config;
+}
+// 保持阶段 9 的服务器默认值不变；STEP-34 才将新局切换到第 2 版。
+export const MAHJONG_MATH_CONFIG = MAHJONG_MATH_CONFIG_V1;
+export const TEMPORARY_STRIPS = MAHJONG_MATH_CONFIG_V1.strips;
+export const TEMPORARY_PAY_TABLE = MAHJONG_MATH_CONFIG_V1.payTable;
 
 function mod(value: number, length: number): number { return ((value % length) + length) % length; }
 function cloneBoard(board: Board): Board { return board.map((column) => column.map((token) => ({ ...token }))); }
@@ -115,7 +144,10 @@ export function settleSpin(stops: Stops, bet: number, strips = TEMPORARY_STRIPS,
   const huCount = board.flat().filter((token) => token.symbolId === 'HU').length; const freeSpinsAwarded = capped ? 0 : freeSpinsForHu(huCount);
   return { stops, mode, initialBoard, cascadeSteps, finalBoard: cloneBoard(board), payout, capped, capRemainingAfter: capRemaining, huCount, freeSpinsAwarded, replayInput: { mode, bet, stops, capRemainingBefore } };
 }
-export function replaySpin(input: ReplayInput, strips = TEMPORARY_STRIPS, payTable = TEMPORARY_PAY_TABLE): SpinOutcome { return settleSpin(input.stops, input.bet, strips, payTable, { mode: input.mode, capRemainingBefore: input.capRemainingBefore }); }
+export function replaySpin(input: ReplayInput, strips?: readonly (readonly Token[])[], payTable?: PayTable): SpinOutcome {
+  const config = strips || payTable ? undefined : mathConfigForVersion(input.mathConfigVersion ?? MAHJONG_MATH_CONFIG_V1.version);
+  return settleSpin(input.stops, input.bet, strips ?? config!.strips, payTable ?? config!.payTable, { mode: input.mode, capRemainingBefore: input.capRemainingBefore });
+}
 export function freeStateFromPaidSpin(outcome: SpinOutcome): FreeSpinState | undefined { return outcome.mode === 'paid' && !outcome.capped && outcome.freeSpinsAwarded > 0 ? { bet: outcome.replayInput.bet, remaining: outcome.freeSpinsAwarded, parentTotalWin: outcome.payout, capped: false } : undefined; }
 export function settleFreeSpin(state: FreeSpinState, stops: Stops, strips = TEMPORARY_STRIPS, payTable = TEMPORARY_PAY_TABLE): Readonly<{ outcome: SpinOutcome; state: FreeSpinState | undefined }> {
   if (state.remaining <= 0 || state.capped) throw new Error('没有可用免费旋转'); const outcome = settleSpin(stops, state.bet, strips, payTable, { mode: 'free', capRemainingBefore: state.bet * MAX_WIN_MULTIPLIER - state.parentTotalWin });
