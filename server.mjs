@@ -340,7 +340,7 @@ async function handleRabbitSpin(session, input, res) {
         stripRevision: RABBIT_STRIP_REVISION, bet, parentRoundId: roundId, mode: 'paid', triggerRoll,
         paidStops, modeStops: trigger ? rabbitModeStops() : [], capRemainingBefore: bet * RABBIT_MAX_WIN_MULTIPLIER,
       };
-      const outcome = settleRabbitRound(replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+      const outcome = settleRabbitRound(replayInput);
       const paid = outcome.paidSpin;
       const winTransactionId = `${roundId}-win`;
       rounds.add({
@@ -371,7 +371,7 @@ async function handleRabbitSpin(session, input, res) {
       });
     }
 
-    const fullOutcome = replayRabbitRound(free.replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+    const fullOutcome = replayRabbitRound(free.replayInput);
     const modeIndex = free.played;
     const modeOutcome = fullOutcome.modeSpins[modeIndex];
     if (!modeOutcome) {
@@ -496,7 +496,7 @@ function handleRoundLookup(raw, req, res) {
     const gameId = round.gameId ?? 'wild-frontier';
     if (gameId === 'jade-rabbit') {
       try {
-        const replayed = replayRabbitRound(round.replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+        const replayed = replayRabbitRound(round.replayInput);
         const parentRoundId = round.parentRoundId ?? round.roundId;
         const related = rounds.list((candidate) => candidate.gameId === 'jade-rabbit' && (candidate.roundId === parentRoundId || candidate.parentRoundId === parentRoundId), 50);
         const recordedTotal = related.reduce((total, candidate) => total + candidate.payout, 0);

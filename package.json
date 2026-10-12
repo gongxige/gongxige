@@ -17,6 +17,7 @@
     "rtp": "node scripts/rtp-report.ts",
     "rtp:mahjong": "node scripts/rtp-mahjong.ts",
     "rtp:rabbit": "node scripts/rtp-rabbit.ts",
+    "rtp:rabbit:exact": "node scripts/rtp-rabbit-exact.ts",
     "operator": "node mock-operator.mjs",
     "check:provider": "node scripts/provider-check.mjs",
     "check:platform": "node scripts/platform-check.mjs",

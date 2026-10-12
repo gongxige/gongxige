@@ -3,12 +3,22 @@
 export const BOARD_HEIGHTS = [3, 4, 3] as const;
 export const MODE_SPINS = 8;
 export const MAX_WIN_MULTIPLIER = 5_000;
-export const MODE_TRIGGER_PROBABILITY = 0.00745;
 export const ENGINE_VERSION = 'jade-rabbit-engine-1.0.0';
-/** STEP-47：中奖线改为只连相邻格的 10 条，数学版本升到 1.2.0；1.1.0 的旧线只用于回放旧局。 */
-export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.2.0';
+/**
+ * 数学版本：
+ * - 1.1.0（STEP-39）：自定 10 条线，低分赔付 8/6/4，牌匾 0.5～10 倍；
+ * - 1.2.0（STEP-47）：线改成只连相邻格，其余同 1.1.0；
+ * - 1.3.0（STEP-50）：按参考游戏规则——线号顺序、低分赔付 5/3/2、牌匾 0.5～500 倍，重新调校到 96.75%。
+ * 旧版本只用于回放旧局，新局都用当前版本。
+ */
+export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.3.0';
+export const MATH_CONFIG_VERSION_V2 = 'jade-rabbit-math-1.2.0';
 export const MATH_CONFIG_VERSION_V1 = 'jade-rabbit-math-1.1.0';
-export const STRIP_REVISION = 'jade-rabbit-strip-1.1.0';
+export const STRIP_REVISION = 'jade-rabbit-strip-1.3.0';
+export const STRIP_REVISION_V1 = 'jade-rabbit-strip-1.1.0';
+/** 每次付费旋转独立触发玉兔模式的概率（1.3.0）。 */
+export const MODE_TRIGGER_PROBABILITY = 0.003853;
+export const MODE_TRIGGER_PROBABILITY_V1 = 0.00745;
 
 export type LineSymbolId =
   | 'YUANBAO'
@@ -37,7 +47,19 @@ export type PayTable = Readonly<Partial<Record<SymbolId, number>>>;
 
 export const BONUS_MULTIPLIERS = [0.5, 1, 2, 5, 10, 20, 50, 100, 250, 500] as const;
 
+/** 1.3.0 赔付表（每线投注的倍数），和参考游戏一致。 */
 export const PAYTABLE = {
+  WILD: 200,
+  YUANBAO: 100,
+  FU_BAG: 50,
+  RED_ENVELOPE: 10,
+  COPPER_COIN: 5,
+  FIRECRACKER: 3,
+  CARROT: 2,
+} as const satisfies PayTable;
+
+/** 1.1.0、1.2.0 的旧赔付表，只用于回放旧局。 */
+export const PAYTABLE_V1 = {
   WILD: 200,
   YUANBAO: 100,
   FU_BAG: 50,
@@ -62,10 +84,10 @@ export const PAYLINES_V1 = [
 ] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
 
 /**
- * 1.2.0 起的 10 条线（左、中、右）。中列比两侧高半格：两侧第 r 格夹在中列第 r、r+1 格之间，
+ * 1.2.0 的 10 条线（左、中、右），线号是 STEP-47 按图整理的顺序，只用于回放 1.2.0 的旧局。中列比两侧高半格：两侧第 r 格夹在中列第 r、r+1 格之间，
  * 每条线只走到相邻格，和参考游戏的中奖线图一致。
  */
-export const PAYLINES = [
+export const PAYLINES_V2 = [
   [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
   [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
   [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
@@ -78,14 +100,24 @@ export const PAYLINES = [
   [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }],
 ] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
 
-export type Paylines = readonly (readonly [Coordinate, Coordinate, Coordinate])[];
+/**
+ * 1.3.0 起的 10 条线（左、中、右），线号顺序和参考游戏规则页的中奖线图一致。
+ * 中列比两侧高半格：两侧第 r 格夹在中列第 r、r+1 格之间，每条线只走到相邻格。
+ */
+export const PAYLINES = [
+  [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 2 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 2 }, { x: 2, y: 2 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }],
+] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
 
-/** 按记录里的数学版本取中奖线；未知版本直接报错，不猜。 */
-export function paylinesForVersion(mathConfigVersion: string): Paylines {
-  if (mathConfigVersion === MATH_CONFIG_VERSION) return PAYLINES;
-  if (mathConfigVersion === MATH_CONFIG_VERSION_V1) return PAYLINES_V1;
-  throw new Error(`数学版本不可用：${mathConfigVersion}`);
-}
+
 
 function token(symbolId: SymbolId, stackGroupId: string, bonusTier?: BonusTier): Token {
   return bonusTier === undefined ? { symbolId, stackGroupId } : { symbolId, stackGroupId, bonusTier };
@@ -145,19 +177,100 @@ function mathModeStrip(prefix: string, phase: number): Strip {
   });
 }
 
-/** STEP-39 正式数学轴带：每条主轴 100 格，12 格奖金牌匾；其余 88 格为线奖符号。 */
-export const MATH_STRIPS: ReelStrips = [
+/** STEP-39 数学轴带（1.1.0、1.2.0）：每条主轴 100 格，12 格奖金牌匾；其余 88 格为线奖符号。只用于回放旧局。 */
+export const MATH_STRIPS_V1: ReelStrips = [
   mathMainStrip('L', 0x39102026),
   mathMainStrip('M', 0x39102027),
   mathMainStrip('R', 0x39102028),
 ];
 
-/** 玉兔模式轴带固定为 100 格、50 格牌匾和 50 格空白，窗口平均包含 5 枚牌匾。 */
-export const MATH_MODE_STRIPS: ReelStrips = [
+/** 1.1.0、1.2.0 的玉兔模式轴带：100 格、50 格牌匾和 50 格空白。只用于回放旧局。 */
+export const MATH_MODE_STRIPS_V1: ReelStrips = [
   mathModeStrip('ML', 0),
   mathModeStrip('MM', 1),
   mathModeStrip('MR', 0),
 ];
+
+/**
+ * 1.3.0 主游戏轴带：每条 2000 格。线奖符号按每 100 格「百搭 6、元宝 3、福袋 6、红包 10、铜钱 24、鞭炮 24、胡萝卜 15」×20，
+ * 另有 240 格奖金牌匾。牌匾档位数（×0.5、×1、×2、×5、×10、×20、×50、×100、×250、×500）：
+ * 两侧列 110/60/35/18/9/5/2/1/0/0，中列 110/60/34/18/9/5/2/1/0/1（中列有 1 枚 ×500）。
+ */
+const MAIN_SYMBOL_COUNTS_V3: Readonly<Record<LineSymbolId | 'WILD', number>> = {
+  WILD: 6, YUANBAO: 3, FU_BAG: 6, RED_ENVELOPE: 10, COPPER_COIN: 24, FIRECRACKER: 24, CARROT: 15,
+};
+const MAIN_TIER_COUNTS_SIDE_V3 = [110, 60, 35, 18, 9, 5, 2, 1, 0, 0] as const;
+const MAIN_TIER_COUNTS_MIDDLE_V3 = [110, 60, 34, 18, 9, 5, 2, 1, 0, 1] as const;
+/** 1.3.0 玉兔模式每条轴带 1000 枚牌匾的档位数（和空白格交替，共 2000 格），含 ×250、×500 各 1 枚。 */
+const MODE_TIER_COUNTS_V3 = [300, 320, 200, 100, 45, 20, 9, 4, 1, 1] as const;
+
+function mainStripV3(prefix: string, seed: number, tierCounts: readonly number[]): Strip {
+  const entries: Token[] = [];
+  for (const [symbolId, perHundred] of Object.entries(MAIN_SYMBOL_COUNTS_V3) as [LineSymbolId | 'WILD', number][]) {
+    for (let index = 0; index < perHundred * 20; index += 1) entries.push(token(symbolId, `${prefix}-${symbolId}-${index}`));
+  }
+  tierCounts.forEach((count, tier) => {
+    for (let index = 0; index < count; index += 1) entries.push(token('BONUS_PLATE', `${prefix}-BONUS-${tier}-${index}`, tier as BonusTier));
+  });
+  const shuffled = deterministicShuffle(entries, seed);
+  return shuffled.map((entry, index) => {
+    const previous = shuffled[index - 1];
+    const sameRun = previous && previous.symbolId === entry.symbolId && entry.symbolId !== 'BONUS_PLATE';
+    return sameRun ? { ...entry, stackGroupId: previous.stackGroupId } : entry;
+  });
+}
+
+function modeStripV3(prefix: string, phase: number, seed: number): Strip {
+  const tiers = deterministicShuffle(MODE_TIER_COUNTS_V3.flatMap((count, tier) => Array<BonusTier>(count).fill(tier as BonusTier)), seed);
+  return Array.from({ length: tiers.length * 2 }, (_, index) => {
+    if ((index + phase) % 2 === 1) return token('BLANK', `${prefix}-blank-${index}`);
+    return token('BONUS_PLATE', `${prefix}-bonus-${index}`, tiers[((index + phase) >> 1) % tiers.length]);
+  });
+}
+
+/** 1.3.0 正式数学轴带。 */
+export const MATH_STRIPS: ReelStrips = [
+  mainStripV3('L3', 0x50102026, MAIN_TIER_COUNTS_SIDE_V3),
+  mainStripV3('M3', 0x50102027, MAIN_TIER_COUNTS_MIDDLE_V3),
+  mainStripV3('R3', 0x50102028, MAIN_TIER_COUNTS_SIDE_V3),
+];
+
+export const MATH_MODE_STRIPS: ReelStrips = [
+  modeStripV3('ML3', 0, 0x50102029),
+  modeStripV3('MM3', 1, 0x5010202a),
+  modeStripV3('MR3', 0, 0x5010202b),
+];
+
+export type Paylines = readonly (readonly [Coordinate, Coordinate, Coordinate])[];
+
+/** 每个数学版本的完整配置：线、赔付表、轴带、触发概率。结算和回放都按记录里的版本取配置。 */
+export interface MathConfig {
+  readonly version: string;
+  readonly stripRevision: string;
+  readonly paylines: Paylines;
+  readonly payTable: PayTable;
+  readonly strips: ReelStrips;
+  readonly modeStrips: ReelStrips;
+  readonly modeTriggerProbability: number;
+}
+
+const MATH_CONFIGS: readonly MathConfig[] = [
+  { version: MATH_CONFIG_VERSION, stripRevision: STRIP_REVISION, paylines: PAYLINES, payTable: PAYTABLE, strips: MATH_STRIPS, modeStrips: MATH_MODE_STRIPS, modeTriggerProbability: MODE_TRIGGER_PROBABILITY },
+  { version: MATH_CONFIG_VERSION_V2, stripRevision: STRIP_REVISION_V1, paylines: PAYLINES_V2, payTable: PAYTABLE_V1, strips: MATH_STRIPS_V1, modeStrips: MATH_MODE_STRIPS_V1, modeTriggerProbability: MODE_TRIGGER_PROBABILITY_V1 },
+  { version: MATH_CONFIG_VERSION_V1, stripRevision: STRIP_REVISION_V1, paylines: PAYLINES_V1, payTable: PAYTABLE_V1, strips: MATH_STRIPS_V1, modeStrips: MATH_MODE_STRIPS_V1, modeTriggerProbability: MODE_TRIGGER_PROBABILITY_V1 },
+];
+
+/** 按记录里的数学版本取配置；未知版本直接报错，不猜。 */
+export function mathConfigForVersion(mathConfigVersion: string): MathConfig {
+  const config = MATH_CONFIGS.find((entry) => entry.version === mathConfigVersion);
+  if (!config) throw new Error(`数学版本不可用：${mathConfigVersion}`);
+  return config;
+}
+
+/** 按记录里的数学版本取中奖线。 */
+export function paylinesForVersion(mathConfigVersion: string): Paylines {
+  return mathConfigForVersion(mathConfigVersion).paylines;
+}
 
 /** 保留旧导出名，服务器尚未接入玉兔时也能继续使用同一默认配置。 */
 export const TEMPORARY_STRIPS = MATH_STRIPS;
@@ -273,7 +386,12 @@ function assertStops(stops: readonly number[]): asserts stops is Stops {
   if (stops.length !== 3 || !stops.every(Number.isInteger)) throw new Error('停点必须是三个整数');
 }
 
+/** 已经检查过的轴带（同一组轴带对象只检查一次；1.3.0 每条 2,000 格，每局都逐格检查会让模拟慢很多倍）。 */
+const checkedStrips = new WeakSet<ReelStrips>();
+const checkedModeStrips = new WeakSet<ReelStrips>();
+
 function assertStrips(strips: ReelStrips): void {
+  if (checkedStrips.has(strips)) return;
   if (strips.length !== BOARD_HEIGHTS.length) throw new Error('需要三条轴带');
   strips.forEach((strip, x) => {
     if (strip.length === 0) throw new Error(`第 ${x + 1} 条轴带不能为空`);
@@ -283,9 +401,11 @@ function assertStrips(strips: ReelStrips): void {
       if (entry.symbolId !== 'BONUS_PLATE' && entry.bonusTier !== undefined) throw new Error('只有奖金牌匾可以带数值档位');
     });
   });
+  checkedStrips.add(strips);
 }
 
 function assertModeStrips(strips: ReelStrips): void {
+  if (checkedModeStrips.has(strips)) return;
   if (strips.length !== BOARD_HEIGHTS.length) throw new Error('需要三条玉兔模式轴带');
   strips.forEach((strip, x) => {
     if (strip.length === 0) throw new Error(`玉兔模式第 ${x + 1} 条轴带不能为空`);
@@ -295,6 +415,7 @@ function assertModeStrips(strips: ReelStrips): void {
       if (entry.symbolId === 'BLANK' && entry.bonusTier !== undefined) throw new Error('空白格不能带数值档位');
     });
   });
+  checkedModeStrips.add(strips);
 }
 
 /** 正数按“舍入到最近整数，.5 向上”处理。 */
@@ -405,8 +526,8 @@ function validateReplayInput(input: ReplayInput): void {
   if (input.mode !== 'paid') throw new Error('玉兔送财回放必须从付费旋转开始');
   if (!input.parentRoundId) throw new Error('回放缺少父局号');
   if (input.engineVersion !== ENGINE_VERSION) throw new Error(`引擎版本不可用：${input.engineVersion}`);
-  paylinesForVersion(input.mathConfigVersion);
-  if (input.stripRevision !== STRIP_REVISION) throw new Error(`轴带版本不可用：${input.stripRevision}`);
+  const config = mathConfigForVersion(input.mathConfigVersion);
+  if (input.stripRevision !== config.stripRevision) throw new Error(`轴带版本不可用：${input.stripRevision}`);
   assertBet(input.bet);
   assertStops(input.paidStops);
   if (!Number.isFinite(input.triggerRoll) || input.triggerRoll < 0 || input.triggerRoll >= 1) throw new Error('触发抽样必须在 [0, 1) 内');
@@ -456,22 +577,30 @@ function settleModeSpin(stops: Stops, bet: number, strips: ReelStrips, capRemain
 }
 
 /** 仅按记录中的固定触发抽样判断是否进入玉兔模式。 */
-export function isModeTriggered(triggerRoll: number): boolean {
+export function isModeTriggered(triggerRoll: number, probability: number = MODE_TRIGGER_PROBABILITY): boolean {
   if (!Number.isFinite(triggerRoll) || triggerRoll < 0 || triggerRoll >= 1) throw new Error('触发抽样必须在 [0, 1) 内');
-  return triggerRoll < MODE_TRIGGER_PROBABILITY;
+  return triggerRoll < probability;
 }
 
 /** 结算一次付费旋转及其可能触发的完整玉兔模式。 */
-export function settleRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_STRIPS, modeStrips: ReelStrips = TEMPORARY_MODE_STRIPS, payTable: PayTable = PAYTABLE): RoundOutcome {
+/**
+ * 结算一次付费旋转及其可能触发的完整玉兔模式。轴带、赔付表默认按记录里的数学版本取；
+ * 测试可以传入自定义轴带和赔付表。
+ */
+export function settleRound(input: ReplayInput, customStrips?: ReelStrips, customModeStrips?: ReelStrips, customPayTable?: PayTable): RoundOutcome {
   validateReplayInput(input);
+  const config = mathConfigForVersion(input.mathConfigVersion);
+  const strips = customStrips ?? config.strips;
+  const modeStrips = customModeStrips ?? config.modeStrips;
+  const payTable = customPayTable ?? config.payTable;
   assertStrips(strips);
   assertModeStrips(modeStrips);
 
   const cap = MAX_WIN_MULTIPLIER * input.bet;
   if (input.capRemainingBefore > cap) throw new Error('封顶余额不能超过本轮封顶值');
 
-  const paidSpin = capSpin(settleSpin(input.paidStops, input.bet, strips, payTable, paylinesForVersion(input.mathConfigVersion)), input.capRemainingBefore);
-  const triggered = isModeTriggered(input.triggerRoll);
+  const paidSpin = capSpin(settleSpin(input.paidStops, input.bet, strips, payTable, config.paylines), input.capRemainingBefore);
+  const triggered = isModeTriggered(input.triggerRoll, config.modeTriggerProbability);
   const modeCanStart = triggered && !paidSpin.capped;
   if (modeCanStart && input.modeStops.length !== MODE_SPINS) throw new Error('已触发玉兔模式时必须记录八组停点');
   if (!modeCanStart && input.modeStops.length !== 0) throw new Error('未开始玉兔模式时不能带模式停点');
@@ -501,8 +630,8 @@ export function settleRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_S
 }
 
 /** 回放不再抽随机数，只使用记录的版本、停点和触发抽样。 */
-export function replayRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_STRIPS, modeStrips: ReelStrips = TEMPORARY_MODE_STRIPS, payTable: PayTable = PAYTABLE): RoundOutcome {
-  return settleRound(input, strips, modeStrips, payTable);
+export function replayRound(input: ReplayInput, customStrips?: ReelStrips, customModeStrips?: ReelStrips, customPayTable?: PayTable): RoundOutcome {
+  return settleRound(input, customStrips, customModeStrips, customPayTable);
 }
 
 /** 与麻将引擎相同的命名习惯：一条回放记录代表完整的一轮。 */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BOARD_HEIGHTS, ENGINE_VERSION, MAX_WIN_MULTIPLIER, MATH_CONFIG_VERSION, MATH_CONFIG_VERSION_V1, MODE_SPINS, PAYLINES, PAYLINES_V1, PAYTABLE, STRIP_REVISION, TEMPORARY_MODE_STRIPS, TEMPORARY_STRIPS, boardFromStops, evaluateBonusPlates, evaluateLines, paylinesForVersion, replayRound, settleRound, settleSpin, type Board, type PayTable, type Paylines, type ReplayInput, type ReelStrips, type SymbolId, type Token } from './index.ts';
+import { BOARD_HEIGHTS, ENGINE_VERSION, MAX_WIN_MULTIPLIER, MATH_CONFIG_VERSION, MATH_CONFIG_VERSION_V1, MATH_CONFIG_VERSION_V2, MATH_MODE_STRIPS, MATH_STRIPS, MATH_STRIPS_V1, MODE_SPINS, MODE_TRIGGER_PROBABILITY, PAYLINES, PAYLINES_V1, PAYLINES_V2, PAYTABLE, PAYTABLE_V1, STRIP_REVISION, TEMPORARY_MODE_STRIPS, TEMPORARY_STRIPS, boardFromStops, evaluateBonusPlates, evaluateLines, mathConfigForVersion, paylinesForVersion, replayRound, settleRound, settleSpin, type Board, type PayTable, type Paylines, type ReplayInput, type ReelStrips, type SymbolId, type Token } from './index.ts';
 
 const cell = (symbolId: SymbolId, stackGroupId = `test-${symbolId}`): Token => ({ symbolId, stackGroupId });
 const bonus = (tier: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, stackGroupId = `bonus-${tier}`): Token => ({ symbolId: 'BONUS_PLATE', stackGroupId, bonusTier: tier });
@@ -16,18 +16,27 @@ function board(...rows: string[]): Board {
 }
 
 describe('玉兔送财 STEP-37 盘面和线奖', () => {
-  it('冻结 3-4-3 盘面和设计文档中的 10 条线（1.2.0 起只连相邻格）', () => {
+  it('冻结 3-4-3 盘面和设计文档中的 10 条线（1.3.0 线号顺序按参考游戏中奖线图）', () => {
     assert.deepEqual(BOARD_HEIGHTS, [3, 4, 3]);
     const asText = (lines: Paylines) => lines.map((line) => line.map(({ x, y }) => `${x}${y}`).join('-'));
     assert.deepEqual(asText(PAYLINES), [
+      '00-10-20', '00-11-20', '00-11-21', '01-11-20', '01-11-21',
+      '01-12-21', '01-12-22', '02-12-21', '02-12-22', '02-13-22',
+    ]);
+    assert.deepEqual(asText(PAYLINES_V2), [
       '00-10-20', '00-11-20', '01-11-21', '00-11-21', '01-11-20',
       '01-12-21', '02-12-22', '01-12-22', '02-12-21', '02-13-22',
     ]);
+    assert.deepEqual(new Set(asText(PAYLINES)), new Set(asText(PAYLINES_V2)), '1.3.0 和 1.2.0 是同一组线，只是线号不同');
     assert.deepEqual(asText(PAYLINES_V1), [
       '00-10-20', '00-11-20', '00-11-21', '00-12-21', '00-12-22',
       '01-11-21', '01-11-22', '01-12-21', '01-12-22', '02-13-22',
     ]);
     assert.deepEqual(PAYTABLE, {
+      WILD: 200, YUANBAO: 100, FU_BAG: 50, RED_ENVELOPE: 10,
+      COPPER_COIN: 5, FIRECRACKER: 3, CARROT: 2,
+    });
+    assert.deepEqual(PAYTABLE_V1, {
       WILD: 200, YUANBAO: 100, FU_BAG: 50, RED_ENVELOPE: 10,
       COPPER_COIN: 8, FIRECRACKER: 6, CARROT: 4,
     });
@@ -64,9 +73,16 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
     ), 100);
     assert.deepEqual(result.map((win) => [win.lineNumber, win.symbolId, win.payout]), [
       [1, 'YUANBAO', 1_000],
-      [3, 'CARROT', 40],
+      [5, 'CARROT', 20],
     ]);
-    assert.equal(result.reduce((total, win) => total + win.payout, 0), 1_040);
+    assert.equal(result.reduce((total, win) => total + win.payout, 0), 1_020);
+    // 同一盘面按 1.2.0 的线号和旧赔付：中线是第 3 条，胡萝卜 ×4
+    assert.deepEqual(evaluateLines(board(
+      'YUANBAO WILD YUANBAO',
+      'CARROT CARROT CARROT',
+      'COPPER_COIN FIRECRACKER FU_BAG',
+      'YUANBAO RED_ENVELOPE CARROT',
+    ), 100, PAYTABLE_V1, PAYLINES_V2).map((win) => [win.lineNumber, win.symbolId, win.payout]), [[1, 'YUANBAO', 1_000], [3, 'CARROT', 40]]);
   });
 
   it('百搭替代普通符号，但全百搭只支付一次百搭奖', () => {
@@ -106,8 +122,8 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
       'YUANBAO RED_ENVELOPE COPPER_COIN',
       'FU_BAG YUANBAO FIRECRACKER',
     );
-    assert.equal(evaluateLines(carrot, 101).find((win) => win.lineNumber === 3)?.payout, 40);
-    assert.equal(evaluateLines(carrot, 101, { CARROT: 5 }).find((win) => win.lineNumber === 3)?.payout, 51);
+    assert.equal(evaluateLines(carrot, 101).find((win) => win.lineNumber === 5)?.payout, 20);
+    assert.equal(evaluateLines(carrot, 101, { CARROT: 5 }).find((win) => win.lineNumber === 5)?.payout, 51);
   });
 
   it('1.2.0 的每条线只连相邻格：侧列第 r 格只连中列第 r 或 r+1 格，没有重复线', () => {
@@ -148,7 +164,7 @@ describe('玉兔送财 STEP-38 奖金牌匾、玉兔模式、封顶和回放', (
       [cell('COPPER_COIN', 'r0'), cell('YUANBAO', 'r1'), cell('CARROT', 'r2')],
     ];
     const input = (mathConfigVersion: string): ReplayInput => ({
-      gameId: 'jade-rabbit', engineVersion: ENGINE_VERSION, mathConfigVersion, stripRevision: STRIP_REVISION,
+      gameId: 'jade-rabbit', engineVersion: ENGINE_VERSION, mathConfigVersion, stripRevision: mathConfigVersion === 'jade-rabbit-math-0.0.1' ? STRIP_REVISION : mathConfigForVersion(mathConfigVersion).stripRevision,
       bet: 100, parentRoundId: 'step-47', mode: 'paid', triggerRoll: 0.5, paidStops: [0, 0, 0], modeStops: [],
       capRemainingBefore: 100 * MAX_WIN_MULTIPLIER,
     });
@@ -159,6 +175,56 @@ describe('玉兔送财 STEP-38 奖金牌匾、玉兔模式、封顶和回放', (
     assert.deepEqual(newRound.paidSpin.lineWins, []);
     assert.equal(newRound.totalWin, 0);
     assert.throws(() => replayRound(input('jade-rabbit-math-0.0.1'), strips, TEMPORARY_MODE_STRIPS), /数学版本不可用/);
+    // 1.2.0 和 1.3.0 都只连相邻格，但线号不同、低分赔付不同
+    const middleCarrot: ReelStrips = [
+      [cell('YUANBAO', 'a0'), cell('CARROT', 'a1'), cell('COPPER_COIN', 'a2')],
+      [cell('RED_ENVELOPE', 'b0'), cell('CARROT', 'b1'), cell('FU_BAG', 'b2'), cell('FIRECRACKER', 'b3')],
+      [cell('COPPER_COIN', 'c0'), cell('CARROT', 'c1'), cell('FU_BAG', 'c2')],
+    ];
+    assert.deepEqual(replayRound(input(MATH_CONFIG_VERSION_V2), middleCarrot, TEMPORARY_MODE_STRIPS).paidSpin.lineWins.map((win) => [win.lineNumber, win.payout]), [[3, 40]]);
+    assert.deepEqual(settleRound(input(MATH_CONFIG_VERSION), middleCarrot, TEMPORARY_MODE_STRIPS).paidSpin.lineWins.map((win) => [win.lineNumber, win.payout]), [[5, 20]]);
+  });
+
+  it('STEP-50：旧版本记录用旧轴带、旧赔付和旧触发率回放，新版本用 1.3.0 配置', () => {
+    const v1 = mathConfigForVersion(MATH_CONFIG_VERSION_V1);
+    const v2 = mathConfigForVersion(MATH_CONFIG_VERSION_V2);
+    const v3 = mathConfigForVersion(MATH_CONFIG_VERSION);
+    assert.equal(v1.strips, MATH_STRIPS_V1);
+    assert.equal(v2.strips, MATH_STRIPS_V1);
+    assert.equal(v3.strips, MATH_STRIPS);
+    assert.equal(v2.payTable, PAYTABLE_V1);
+    assert.equal(v3.payTable, PAYTABLE);
+    assert.equal(v1.modeTriggerProbability, 0.00745);
+    assert.equal(v3.modeTriggerProbability, MODE_TRIGGER_PROBABILITY);
+    assert.equal(v3.stripRevision, STRIP_REVISION);
+    assert.notEqual(v2.stripRevision, v3.stripRevision);
+    // 触发抽样 0.005：旧版本（0.745%）触发，新版本（0.3853%）不触发
+    const roll = (version: string, stripRevision: string, stops: readonly [number, number, number]) => replayRound({
+      gameId: 'jade-rabbit', engineVersion: ENGINE_VERSION, mathConfigVersion: version, stripRevision, bet: 100,
+      parentRoundId: 'step-50', mode: 'paid', triggerRoll: 0.005, paidStops: stops,
+      modeStops: version === MATH_CONFIG_VERSION ? [] : Array.from({ length: MODE_SPINS }, () => [0, 0, 0] as const),
+      capRemainingBefore: 100 * MAX_WIN_MULTIPLIER,
+    });
+    assert.equal(roll(MATH_CONFIG_VERSION_V2, v2.stripRevision, [0, 0, 0]).triggered, true);
+    assert.equal(roll(MATH_CONFIG_VERSION, v3.stripRevision, [0, 0, 0]).triggered, false);
+    // 旧版本按旧轴带（100 格）取盘面
+    assert.deepEqual(roll(MATH_CONFIG_VERSION_V2, v2.stripRevision, [5, 6, 7]).paidSpin.board, boardFromStops(MATH_STRIPS_V1, [5, 6, 7]));
+    assert.deepEqual(roll(MATH_CONFIG_VERSION, v3.stripRevision, [1500, 1600, 1700]).paidSpin.board, boardFromStops(MATH_STRIPS, [1500, 1600, 1700]));
+  });
+
+  it('STEP-50：1.3.0 轴带构成（主轴 2000 格、模式轴 2000 格），牌匾档位覆盖 ×0.5～×500', () => {
+    for (const strip of MATH_STRIPS) {
+      assert.equal(strip.length, 2_000);
+      assert.equal(strip.filter((entry) => entry.symbolId === 'BONUS_PLATE').length, 240);
+      assert.equal(strip.filter((entry) => entry.symbolId === 'WILD').length, 120);
+    }
+    for (const strip of MATH_MODE_STRIPS) {
+      assert.equal(strip.length, 2_000);
+      assert.equal(strip.filter((entry) => entry.symbolId === 'BONUS_PLATE').length, 1_000);
+      assert.ok(strip.every((entry) => entry.symbolId === 'BLANK' || entry.bonusTier !== undefined), '每枚牌匾都有档位');
+    }
+    const tiers = new Set([...MATH_STRIPS, ...MATH_MODE_STRIPS].flat().filter((entry) => entry.symbolId === 'BONUS_PLATE').map((entry) => entry.bonusTier));
+    assert.deepEqual([...tiers].sort((a, b) => a! - b!), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   const replayBase = (overrides: Partial<ReplayInput> = {}): ReplayInput => ({
@@ -255,8 +321,8 @@ describe('玉兔送财 STEP-38 奖金牌匾、玉兔模式、封顶和回放', (
       const outcome = settleRound(replayBase({
         parentRoundId: `math-cap-${index}`,
         triggerRoll: triggered ? 0 : 0.5,
-        paidStops: [next() % 100, next() % 100, next() % 100],
-        modeStops: triggered ? Array.from({ length: MODE_SPINS }, () => [next() % 100, next() % 100, next() % 100] as const) : [],
+        paidStops: [next() % MATH_STRIPS[0].length, next() % MATH_STRIPS[1].length, next() % MATH_STRIPS[2].length],
+        modeStops: triggered ? Array.from({ length: MODE_SPINS }, () => [next() % MATH_MODE_STRIPS[0].length, next() % MATH_MODE_STRIPS[1].length, next() % MATH_MODE_STRIPS[2].length] as const) : [],
       }));
       assert.ok(outcome.totalWin <= 100 * MAX_WIN_MULTIPLIER);
     }
