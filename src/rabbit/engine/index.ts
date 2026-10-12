@@ -5,7 +5,9 @@ export const MODE_SPINS = 8;
 export const MAX_WIN_MULTIPLIER = 5_000;
 export const MODE_TRIGGER_PROBABILITY = 0.00745;
 export const ENGINE_VERSION = 'jade-rabbit-engine-1.0.0';
-export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.1.0';
+/** STEP-47：中奖线改为只连相邻格的 10 条，数学版本升到 1.2.0；1.1.0 的旧线只用于回放旧局。 */
+export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.2.0';
+export const MATH_CONFIG_VERSION_V1 = 'jade-rabbit-math-1.1.0';
 export const STRIP_REVISION = 'jade-rabbit-strip-1.1.0';
 
 export type LineSymbolId =
@@ -46,7 +48,8 @@ export const PAYTABLE = {
 } as const satisfies PayTable;
 
 /** 按设计文档冻结的 10 条线，坐标顺序均为左、中、右卷轴。 */
-export const PAYLINES = [
+/** 1.1.0 的旧线（其中第 4、5、7 条会跳过中列相邻格），只用于回放 1.1.0 的旧局。 */
+export const PAYLINES_V1 = [
   [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
   [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
   [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
@@ -58,6 +61,32 @@ export const PAYLINES = [
   [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }],
   [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }],
 ] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
+
+/**
+ * 1.2.0 起的 10 条线（左、中、右）。中列比两侧高半格：两侧第 r 格夹在中列第 r、r+1 格之间，
+ * 每条线只走到相邻格，和参考游戏的中奖线图一致。
+ */
+export const PAYLINES = [
+  [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 0 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 2 }, { x: 2, y: 2 }],
+  [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 2 }, { x: 2, y: 1 }],
+  [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }],
+] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
+
+export type Paylines = readonly (readonly [Coordinate, Coordinate, Coordinate])[];
+
+/** 按记录里的数学版本取中奖线；未知版本直接报错，不猜。 */
+export function paylinesForVersion(mathConfigVersion: string): Paylines {
+  if (mathConfigVersion === MATH_CONFIG_VERSION) return PAYLINES;
+  if (mathConfigVersion === MATH_CONFIG_VERSION_V1) return PAYLINES_V1;
+  throw new Error(`数学版本不可用：${mathConfigVersion}`);
+}
 
 function token(symbolId: SymbolId, stackGroupId: string, bonusTier?: BonusTier): Token {
   return bonusTier === undefined ? { symbolId, stackGroupId } : { symbolId, stackGroupId, bonusTier };
@@ -323,12 +352,12 @@ function lineCandidates(symbols: readonly [SymbolId, SymbolId, SymbolId]): reado
 }
 
 /** 计算固定 10 条线；每条线只保留最高的一个可支付候选。 */
-export function evaluateLines(board: Board, bet: number, payTable: PayTable = PAYTABLE): readonly LineWin[] {
+export function evaluateLines(board: Board, bet: number, payTable: PayTable = PAYTABLE, paylines: Paylines = PAYLINES): readonly LineWin[] {
   assertBet(bet);
   assertBoard(board);
   assertPayTable(payTable);
 
-  return PAYLINES.flatMap((coordinates, index) => {
+  return paylines.flatMap((coordinates, index) => {
     const symbols = coordinates.map(({ x, y }) => board[x][y].symbolId) as [SymbolId, SymbolId, SymbolId];
     const best = lineCandidates(symbols)
       .map((symbolId) => ({ symbolId, multiplier: payTable[symbolId] ?? 0 }))
@@ -347,11 +376,11 @@ export function evaluateLines(board: Board, bet: number, payTable: PayTable = PA
   });
 }
 
-export function settleSpin(stops: Stops, bet: number, strips: ReelStrips = TEMPORARY_STRIPS, payTable: PayTable = PAYTABLE): SpinOutcome {
+export function settleSpin(stops: Stops, bet: number, strips: ReelStrips = TEMPORARY_STRIPS, payTable: PayTable = PAYTABLE, paylines: Paylines = PAYLINES): SpinOutcome {
   assertBet(bet);
   assertStrips(strips);
   const board = boardFromStops(strips, stops);
-  const lineWins = evaluateLines(board, bet, payTable);
+  const lineWins = evaluateLines(board, bet, payTable, paylines);
   const bonusWins = evaluateBonusPlates(board, bet);
   const bonusPayoutValue = bonusPayout(bonusWins);
   return {
@@ -377,7 +406,7 @@ function validateReplayInput(input: ReplayInput): void {
   if (input.mode !== 'paid') throw new Error('玉兔送财回放必须从付费旋转开始');
   if (!input.parentRoundId) throw new Error('回放缺少父局号');
   if (input.engineVersion !== ENGINE_VERSION) throw new Error(`引擎版本不可用：${input.engineVersion}`);
-  if (input.mathConfigVersion !== MATH_CONFIG_VERSION) throw new Error(`数学版本不可用：${input.mathConfigVersion}`);
+  paylinesForVersion(input.mathConfigVersion);
   if (input.stripRevision !== STRIP_REVISION) throw new Error(`轴带版本不可用：${input.stripRevision}`);
   assertBet(input.bet);
   assertStops(input.paidStops);
@@ -442,7 +471,7 @@ export function settleRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_S
   const cap = MAX_WIN_MULTIPLIER * input.bet;
   if (input.capRemainingBefore > cap) throw new Error('封顶余额不能超过本轮封顶值');
 
-  const paidSpin = capSpin(settleSpin(input.paidStops, input.bet, strips, payTable), input.capRemainingBefore);
+  const paidSpin = capSpin(settleSpin(input.paidStops, input.bet, strips, payTable, paylinesForVersion(input.mathConfigVersion)), input.capRemainingBefore);
   const triggered = isModeTriggered(input.triggerRoll);
   const modeCanStart = triggered && !paidSpin.capped;
   if (modeCanStart && input.modeStops.length !== MODE_SPINS) throw new Error('已触发玉兔模式时必须记录八组停点');

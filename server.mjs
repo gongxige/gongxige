@@ -371,7 +371,7 @@ async function handleRabbitSpin(session, input, res) {
       roundId, parentRoundId: free.parentRoundId, at: new Date().toISOString(), ...base, gameId: 'jade-rabbit', mode: 'free', bet: free.bet,
       stops: modeOutcome.stops, modeIndex, replayInput, modeSpin: modeOutcome, payout: modeOutcome.payout,
       roundTotalWin: fullOutcome.totalWin, capped: modeOutcome.capped, freeSpinsAwarded: 0,
-      engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION, stripRevision: RABBIT_STRIP_REVISION,
+      engineVersion: replayInput.engineVersion, mathConfigVersion: replayInput.mathConfigVersion, stripRevision: replayInput.stripRevision,
       maxWinMultiplier: RABBIT_MAX_WIN_MULTIPLIER, betTransactionId: null, winTransactionId, status: 'win-pending',
     });
     free.played += 1;
@@ -386,8 +386,8 @@ async function handleRabbitSpin(session, input, res) {
     const settlement = await payRabbitRound(session, player, roundId, modeOutcome.payout);
     save();
     return json(res, 200, {
-      gameId: 'jade-rabbit', engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION,
-      stripRevision: RABBIT_STRIP_REVISION, roundId, parentRoundId: free.parentRoundId, mode: 'free', bet: free.bet,
+      gameId: 'jade-rabbit', engineVersion: replayInput.engineVersion, mathConfigVersion: replayInput.mathConfigVersion,
+      stripRevision: replayInput.stripRevision, roundId, parentRoundId: free.parentRoundId, mode: 'free', bet: free.bet,
       modeIndex, stops: modeOutcome.stops, grid: modeOutcome.board, bonusWins: modeOutcome.bonusWins, payout: modeOutcome.payout,
       roundTotalWin: fullOutcome.totalWin, capped: modeOutcome.capped, credits: player.lastBalance,
       settlementPending: settlement.settlementPending, freeSpinsAwarded: 0, freeSpins: player.freeSpins, freeSpinsFinished,

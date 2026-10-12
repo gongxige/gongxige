@@ -117,6 +117,14 @@ function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
       <div className="rabbit-modal-heading"><span>玉兔送财</span><button type="button" onClick={onClose} aria-label="关闭规则">×</button></div>
       <div className="rabbit-rule-tabs"><b>游戏规则</b><b>赔付表</b></div>
       <p>3-4-3 三列盘面，共 10 条固定中奖线；每线从左到右连成三枚相同普通符号（百搭可替代），按最高赔付结算。奖金牌匾不参加线奖。</p>
+      <h3 className="rabbit-rule-subtitle">中奖线</h3>
+      <div className="rabbit-payline-grid">{PAYLINES.map((line, index) => <figure key={index} aria-label={`第 ${index + 1} 条中奖线`}>
+        <figcaption>{String(index + 1).padStart(2, '0')}</figcaption>
+        <svg viewBox="0 0 30 40" aria-hidden="true">{BOARD_HEIGHTS.map((rows, x) => Array.from({ length: rows }, (_, y) => {
+          const on = line[x].x === x && line[x].y === y;
+          return <rect key={`${x}-${y}`} className={on ? 'is-on' : ''} x={x * 10 + 1} y={(rows === 4 ? 0 : 5) + y * 10 + 1} width="8" height="8" rx="1.5" />;
+        }))}</svg>
+      </figure>)}</div>
       <div className="rabbit-paytable">
         {Object.entries(PAYTABLE).map(([id, multiplier]) => <div key={id}><RabbitSymbol entry={{ symbolId: id as LineSymbolId | 'WILD', stackGroupId: `rules-${id}` }} bet={bet} /><span>{PAYTABLE_LABELS[id]}</span><strong>×{multiplier}</strong></div>)}
       </div>
@@ -369,8 +377,10 @@ export default function JadeRabbitApp() {
   const layout: ArtLayout | null = localArt.layout && localArt.bgMain ? localArt.layout : null;
   const modeLook = inMode || presentation.startsWith('mode-');
   const artBackground = modeLook ? localArt.bgMode ?? localArt.bgMain : localArt.bgMain;
-  const artLinePath = layout && activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => { const point = cellCenter(layout, x, y, BOARD_HEIGHTS[x]); return `${point.x},${point.y}`; }).join(' ') : '';
-  const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
+  // 中奖线按服务器返回的 lineWins 坐标画，不按线号查本地表，保证和结算一致。
+  const activeLineCoordinates = resultLineWins.current?.find((entry) => entry.lineNumber === activeLine)?.coordinates ?? null;
+  const artLinePath = layout && activeLineCoordinates ? activeLineCoordinates.map(({ x, y }) => { const point = cellCenter(layout, x, y, BOARD_HEIGHTS[x]); return `${point.x},${point.y}`; }).join(' ') : '';
+  const linePath = activeLineCoordinates ? activeLineCoordinates.map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
   const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;

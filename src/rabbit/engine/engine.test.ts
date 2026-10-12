@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BOARD_HEIGHTS, ENGINE_VERSION, MAX_WIN_MULTIPLIER, MATH_CONFIG_VERSION, MODE_SPINS, PAYLINES, PAYTABLE, STRIP_REVISION, TEMPORARY_MODE_STRIPS, TEMPORARY_STRIPS, boardFromStops, evaluateBonusPlates, evaluateLines, replayRound, settleRound, settleSpin, type Board, type PayTable, type ReplayInput, type ReelStrips, type SymbolId, type Token } from './index.ts';
+import { BOARD_HEIGHTS, ENGINE_VERSION, MAX_WIN_MULTIPLIER, MATH_CONFIG_VERSION, MATH_CONFIG_VERSION_V1, MODE_SPINS, PAYLINES, PAYLINES_V1, PAYTABLE, STRIP_REVISION, TEMPORARY_MODE_STRIPS, TEMPORARY_STRIPS, boardFromStops, evaluateBonusPlates, evaluateLines, paylinesForVersion, replayRound, settleRound, settleSpin, type Board, type PayTable, type Paylines, type ReplayInput, type ReelStrips, type SymbolId, type Token } from './index.ts';
 
 const cell = (symbolId: SymbolId, stackGroupId = `test-${symbolId}`): Token => ({ symbolId, stackGroupId });
 const bonus = (tier: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, stackGroupId = `bonus-${tier}`): Token => ({ symbolId: 'BONUS_PLATE', stackGroupId, bonusTier: tier });
@@ -16,12 +16,17 @@ function board(...rows: string[]): Board {
 }
 
 describe('玉兔送财 STEP-37 盘面和线奖', () => {
-  it('冻结 3-4-3 盘面和设计文档中的 10 条线', () => {
+  it('冻结 3-4-3 盘面和设计文档中的 10 条线（1.2.0 起只连相邻格）', () => {
     assert.deepEqual(BOARD_HEIGHTS, [3, 4, 3]);
-    assert.equal(PAYLINES.length, 10);
-    assert.deepEqual(PAYLINES[0], [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }]);
-    assert.deepEqual(PAYLINES[5], [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }]);
-    assert.deepEqual(PAYLINES[9], [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }]);
+    const asText = (lines: Paylines) => lines.map((line) => line.map(({ x, y }) => `${x}${y}`).join('-'));
+    assert.deepEqual(asText(PAYLINES), [
+      '00-10-20', '00-11-20', '01-11-21', '00-11-21', '01-11-20',
+      '01-12-21', '02-12-22', '01-12-22', '02-12-21', '02-13-22',
+    ]);
+    assert.deepEqual(asText(PAYLINES_V1), [
+      '00-10-20', '00-11-20', '00-11-21', '00-12-21', '00-12-22',
+      '01-11-21', '01-11-22', '01-12-21', '01-12-22', '02-13-22',
+    ]);
     assert.deepEqual(PAYTABLE, {
       WILD: 200, YUANBAO: 100, FU_BAG: 50, RED_ENVELOPE: 10,
       COPPER_COIN: 8, FIRECRACKER: 6, CARROT: 4,
@@ -59,7 +64,7 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
     ), 100);
     assert.deepEqual(result.map((win) => [win.lineNumber, win.symbolId, win.payout]), [
       [1, 'YUANBAO', 1_000],
-      [6, 'CARROT', 40],
+      [3, 'CARROT', 40],
     ]);
     assert.equal(result.reduce((total, win) => total + win.payout, 0), 1_040);
   });
@@ -101,8 +106,31 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
       'YUANBAO RED_ENVELOPE COPPER_COIN',
       'FU_BAG YUANBAO FIRECRACKER',
     );
-    assert.equal(evaluateLines(carrot, 101).find((win) => win.lineNumber === 6)?.payout, 40);
-    assert.equal(evaluateLines(carrot, 101, { CARROT: 5 }).find((win) => win.lineNumber === 6)?.payout, 51);
+    assert.equal(evaluateLines(carrot, 101).find((win) => win.lineNumber === 3)?.payout, 40);
+    assert.equal(evaluateLines(carrot, 101, { CARROT: 5 }).find((win) => win.lineNumber === 3)?.payout, 51);
+  });
+
+  it('1.2.0 的每条线只连相邻格：侧列第 r 格只连中列第 r 或 r+1 格，没有重复线', () => {
+    for (const [left, middle, right] of PAYLINES) {
+      assert.deepEqual([left.x, middle.x, right.x], [0, 1, 2]);
+      assert.ok(middle.y === left.y || middle.y === left.y + 1, `左 ${left.y} → 中 ${middle.y}`);
+      assert.ok(middle.y === right.y || middle.y === right.y + 1, `中 ${middle.y} → 右 ${right.y}`);
+    }
+    assert.equal(new Set(PAYLINES.map((line) => JSON.stringify(line))).size, 10);
+    assert.equal(paylinesForVersion(MATH_CONFIG_VERSION), PAYLINES);
+    assert.equal(paylinesForVersion(MATH_CONFIG_VERSION_V1), PAYLINES_V1);
+    assert.throws(() => paylinesForVersion('jade-rabbit-math-9.9.9'), /数学版本不可用/);
+  });
+
+  it('旧线里会跳格的走法（左 0 → 中 2 → 右 1）在 1.2.0 不再中奖，在 1.1.0 仍中奖', () => {
+    const jump = board(
+      'YUANBAO RED_ENVELOPE COPPER_COIN',
+      'FIRECRACKER FU_BAG YUANBAO',
+      'COPPER_COIN YUANBAO CARROT',
+      'RED_ENVELOPE CARROT FU_BAG',
+    );
+    assert.deepEqual(evaluateLines(jump, 100).map((win) => win.lineNumber), []);
+    assert.deepEqual(evaluateLines(jump, 100, PAYTABLE, PAYLINES_V1).map((win) => [win.lineNumber, win.symbolId]), [[4, 'YUANBAO']]);
   });
 
   it('同一组停点重复结算结果完全相同', () => {
@@ -113,6 +141,26 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
 });
 
 describe('玉兔送财 STEP-38 奖金牌匾、玉兔模式、封顶和回放', () => {
+  it('STEP-47：1.1.0 旧局按旧线回放，1.2.0 新局按新线结算', () => {
+    const strips: ReelStrips = [
+      [cell('YUANBAO', 'l0'), cell('FIRECRACKER', 'l1'), cell('COPPER_COIN', 'l2')],
+      [cell('RED_ENVELOPE', 'm0'), cell('FU_BAG', 'm1'), cell('YUANBAO', 'm2'), cell('CARROT', 'm3')],
+      [cell('COPPER_COIN', 'r0'), cell('YUANBAO', 'r1'), cell('CARROT', 'r2')],
+    ];
+    const input = (mathConfigVersion: string): ReplayInput => ({
+      gameId: 'jade-rabbit', engineVersion: ENGINE_VERSION, mathConfigVersion, stripRevision: STRIP_REVISION,
+      bet: 100, parentRoundId: 'step-47', mode: 'paid', triggerRoll: 0.5, paidStops: [0, 0, 0], modeStops: [],
+      capRemainingBefore: 100 * MAX_WIN_MULTIPLIER,
+    });
+    const oldRound = replayRound(input(MATH_CONFIG_VERSION_V1), strips, TEMPORARY_MODE_STRIPS);
+    assert.deepEqual(oldRound.paidSpin.lineWins.map((win) => [win.lineNumber, win.symbolId, win.payout]), [[4, 'YUANBAO', 1_000]]);
+    assert.equal(oldRound.totalWin, 1_000);
+    const newRound = settleRound(input(MATH_CONFIG_VERSION), strips, TEMPORARY_MODE_STRIPS);
+    assert.deepEqual(newRound.paidSpin.lineWins, []);
+    assert.equal(newRound.totalWin, 0);
+    assert.throws(() => replayRound(input('jade-rabbit-math-0.0.1'), strips, TEMPORARY_MODE_STRIPS), /数学版本不可用/);
+  });
+
   const replayBase = (overrides: Partial<ReplayInput> = {}): ReplayInput => ({
     gameId: 'jade-rabbit',
     engineVersion: ENGINE_VERSION,
