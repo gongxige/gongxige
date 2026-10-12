@@ -36,9 +36,11 @@ async function playMahjong(cookie: string) {
   const token = gameUrl.searchParams.get('token');
   const session = await (await fetch(`${apiBase}/api/session?token=${token}`)).json();
   assert.equal(session.gameId, 'mahjong-cascade');
+  assert.deepEqual(session.allowedBets, [100, 200, 500, 1_000, 2_000]);
   const spin = await (await fetch(`${apiBase}/api/spin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, bet: session.allowedBets[0] }) })).json();
   assert.ok(spin.roundId, JSON.stringify(spin));
   assert.equal(spin.gameId, 'mahjong-cascade');
+  assert.equal(spin.mathConfigVersion, 'mahjong-math-2.0.0');
   return spin as Json;
 }
 

@@ -142,23 +142,22 @@ assert.equal(report.ok, true);
 step(`同时 20 次下注不会扣成负数：余额 ${target} 时 20 笔 ${BET} 只成功 ${accepted} 笔，剩 ${afterRace.balance}；同时 20 次转动后余额仍 ≥ 0，对账一致`);
 
 // 9. Mahjong Cascade end to end: new player → deposit → approved → 50+ rounds including a free-spin
-//    feature → withdrawal → approved → reconciled. Paid rounds continue past 50 until free spins have
-//    been played (they trigger roughly once in a few hundred paid rounds), so the deposit is generous.
+//    feature → withdrawal → approved → reconciled. The registered 10,000 demo credits are enough for
+//    at least 50 paid rounds at the V2 minimum bet; no special Mahjong deposit is required.
 const mjName = `e2e-mj-${randomBytes(3).toString('hex')}`;
 assert.equal((await post(`${OP}/auth/register`, { username: mjName, password: 'e2e-player-pass-1' })).status, 201);
 const mj = (await post(`${OP}/auth/login`, { username: mjName, password: 'e2e-player-pass-1' })).cookie;
 const mjWallet = async () => (await call(`${OP}/api/wallet`, { cookie: mj })).body;
-const mjDeposit = (await post(`${OP}/api/deposit-requests`, { amount: 20_000_000 }, mj)).body.request;
-assert.equal((await adminPost(`/deposit-requests/${mjDeposit.id}/approve`)).status, 200);
 let mjCredits = (await mjWallet()).balance;
-assert.equal(mjCredits, 20_010_000);
+assert.equal(mjCredits, 10_000);
 const mjLaunch = await post(`${OP}/games/mahjong-cascade/launch`, {}, mj);
 assert.equal(mjLaunch.status, 200);
 const mjToken = new URL(mjLaunch.body.gameUrl).searchParams.get('token');
 const mjSession = (await call(`${API}/api/session?token=${mjToken}`)).body;
 const MJ_BET = mjSession.allowedBets[0];
+assert.equal(MJ_BET, 100);
 let mjRounds = 0; let mjPaid = 0; let mjFree = 0; let mjStaked = 0; let mjWon = 0; let mjCascades = 0;
-while ((mjRounds < ROUNDS || mjFree === 0 || mjSession.freeSpins) && mjPaid < 1500) {
+while ((mjPaid < ROUNDS || mjFree === 0 || mjSession.freeSpins) && mjPaid < 1500) {
   const { status, body } = await post(`${API}/api/spin`, { token: mjToken, bet: MJ_BET });
   assert.equal(status, 200, body.error);
   assert.equal(body.gameId, 'mahjong-cascade');
@@ -169,21 +168,21 @@ while ((mjRounds < ROUNDS || mjFree === 0 || mjSession.freeSpins) && mjPaid < 15
   mjCredits = body.credits;
   mjSession.freeSpins = body.freeSpins;
 }
-assert.ok(mjRounds >= ROUNDS, `mahjong rounds ${mjRounds}`);
+assert.ok(mjPaid >= ROUNDS, `mahjong paid rounds ${mjPaid}`);
 assert.ok(mjFree > 0, `free spins were played within ${mjPaid} paid rounds`);
 assert.equal((await mjWallet()).balance, mjCredits);
-assert.equal(mjCredits, 20_010_000 - mjStaked + mjWon);
+assert.equal(mjCredits, 10_000 - mjStaked + mjWon);
 const mjRecords = (await call(`${OP}/api/game-records`, { cookie: mj })).body.records;
 assert.ok(mjRecords.length > 0 && mjRecords.every((r) => r.gameId === 'mahjong-cascade'), 'player sees only own mahjong rounds');
-step(`麻将连连胡：充值 20,000,000 → 后台通过 → 玩 ${mjRounds} 局（付费 ${mjPaid}、免费 ${mjFree}，共 ${mjCascades} 段消除连锁）：下注 ${mjStaked}、赢分 ${mjWon}，每局余额 = −投注 + 赢分，平台余额 ${mjCredits} 一致`);
-const mjWithdrawal = (await post(`${OP}/api/withdrawal-requests`, { amount: 1_000_000 }, mj)).body.request;
+step(`麻将连连胡：使用注册送的 10,000 积分玩 ${mjRounds} 局（付费 ${mjPaid}、免费 ${mjFree}，共 ${mjCascades} 段消除连锁）：下注 ${mjStaked}、赢分 ${mjWon}，每局余额 = −投注 + 赢分，平台余额 ${mjCredits} 一致`);
+const mjWithdrawal = (await post(`${OP}/api/withdrawal-requests`, { amount: 1_000 }, mj)).body.request;
 assert.equal((await adminPost(`/withdrawal-requests/${mjWithdrawal.id}/approve`)).status, 200);
-mjCredits -= 1_000_000;
+mjCredits -= 1_000;
 assert.deepEqual([(await mjWallet()).balance, (await mjWallet()).frozen_balance], [mjCredits, 0]);
 const mjReport = (await reconciled()).find((r) => r.username === mjName);
 assert.deepEqual([mjReport.ok, mjReport.balance, mjReport.ledgerBalance], [true, mjCredits, mjCredits]);
 assert.ok((await reconciled()).every((r) => r.ok));
-step(`麻将连连胡：提现 1,000,000 → 后台通过 → 对账一致（钱包 ${mjCredits} = 流水之和），所有玩家对账一致`);
+step(`麻将连连胡：提现 1,000 → 后台通过 → 对账一致（钱包 ${mjCredits} = 流水之和），所有玩家对账一致`);
 
 console.log('\n全部通过。');
 process.exit(0);

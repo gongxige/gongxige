@@ -14,7 +14,7 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALLOWED_BETS, ENGINE_VERSION, computeRtp, isAllowedBet, replaySpin, spin } from './src/engine/index.ts';
-import { MAHJONG_MATH_CONFIG, MAX_WIN_MULTIPLIER as MAHJONG_MAX_WIN_MULTIPLIER, replaySpin as replayMahjongSpin, settleSpin as settleMahjongSpin } from './src/mahjong/engine/index.ts';
+import { MAHJONG_MATH_CONFIG, MAHJONG_MATH_CONFIG_V1, MAX_WIN_MULTIPLIER as MAHJONG_MAX_WIN_MULTIPLIER, mathConfigForVersion, replaySpin as replayMahjongSpin, settleSpin as settleMahjongSpin } from './src/mahjong/engine/index.ts';
 import { json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
 import { openRoundLog } from './server/rounds.mjs';
 
@@ -60,8 +60,7 @@ const GAMES = {
   'mahjong-cascade': {
     gameId: 'mahjong-cascade', title: '麻将连连胡', engineVersion: 'mahjong-engine-1.2.0',
     mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision,
-    // The configured rational pay table produces integral virtual credits at this denomination.
-    allowedBets: [10_000], isAllowedBet: (bet) => bet === 10_000, launchPath: '/mahjong',
+    allowedBets: [100, 200, 500, 1_000, 2_000], isAllowedBet: (bet) => [100, 200, 500, 1_000, 2_000].includes(bet), launchPath: '/mahjong',
   },
 };
 const gameFor = (gameId) => GAMES[gameId] ?? null;
@@ -252,9 +251,14 @@ async function handleMahjongSpin(session, input, res) {
   busy.add(key);
   try {
     const player = playerState(session);
-    if (player.freeSpins && player.freeSpins.bet !== 10_000) player.freeSpins = null;
-    const bet = player.freeSpins ? player.freeSpins.bet : Number(input.bet);
-    if (!player.freeSpins && bet !== 10_000) return json(res, 400, { error: 'Invalid mahjong bet.' });
+    // Before STEP-34, persisted free spins have no version metadata and are necessarily
+    // V1 at bet 10,000. Preserve them exactly until they finish; only new paid rounds use V2.
+    const free = player.freeSpins;
+    const mathConfig = free
+      ? mathConfigForVersion(free.mathConfigVersion ?? MAHJONG_MATH_CONFIG_V1.version)
+      : MAHJONG_MATH_CONFIG;
+    const bet = free ? free.bet : Number(input.bet);
+    if (!free && !gameFor('mahjong-cascade').isAllowedBet(bet)) return json(res, 400, { error: 'Invalid mahjong bet.' });
     const roundId = newRoundId();
     const mode = player.freeSpins ? 'free' : 'paid';
     const base = { operatorId: session.operatorId, playerId: session.playerId };
@@ -269,8 +273,8 @@ async function handleMahjongSpin(session, input, res) {
         save(); return json(res, 502, { error: 'Bet unconfirmed; round cancelled.', code: 'BET_UNCONFIRMED' });
       }
     }
-    const capRemainingBefore = player.freeSpins ? Math.max(0, bet * MAHJONG_MAX_WIN_MULTIPLIER - player.freeSpins.totalWin) : bet * MAHJONG_MAX_WIN_MULTIPLIER;
-    const outcome = settleMahjongSpin(MAHJONG_MATH_CONFIG.strips.map((strip) => randomInt(strip.length)), bet, MAHJONG_MATH_CONFIG.strips, MAHJONG_MATH_CONFIG.payTable, { mode, capRemainingBefore });
+    const capRemainingBefore = free ? Math.max(0, bet * MAHJONG_MAX_WIN_MULTIPLIER - free.totalWin) : bet * MAHJONG_MAX_WIN_MULTIPLIER;
+    const outcome = settleMahjongSpin(mathConfig.strips.map((strip) => randomInt(strip.length)), bet, mathConfig.strips, mathConfig.payTable, { mode, capRemainingBefore });
     const triggerRoundId = player.freeSpins?.triggerRoundId ?? null;
     let freeSpinsFinished = null;
     if (player.freeSpins) {
@@ -278,16 +282,17 @@ async function handleMahjongSpin(session, input, res) {
       free.remaining += outcome.freeSpinsAwarded - 1; free.played += 1; free.totalWin += outcome.payout;
       if (free.remaining === 0 || outcome.capped) { freeSpinsFinished = { played: free.played, totalWin: free.totalWin }; player.freeSpins = null; }
     } else if (outcome.freeSpinsAwarded > 0) {
-      player.freeSpins = { bet, remaining: outcome.freeSpinsAwarded, played: 0, totalWin: outcome.payout, triggerRoundId: roundId };
+      player.freeSpins = { bet, remaining: outcome.freeSpinsAwarded, played: 0, totalWin: outcome.payout, triggerRoundId: roundId, mathConfigVersion: mathConfig.version, stripRevision: mathConfig.stripRevision };
     }
     const winTransactionId = `${roundId}-win`;
-    rounds.add({ roundId, parentRoundId: mode === 'free' ? triggerRoundId : null, at: new Date().toISOString(), ...base, gameId: 'mahjong-cascade', mode, bet, stops: outcome.stops, replayInput: outcome.replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, freeSpinsAwarded: outcome.freeSpinsAwarded, maxWinMultiplier: MAHJONG_MAX_WIN_MULTIPLIER, engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision, betTransactionId, winTransactionId, status: 'win-pending' });
+    const replayInput = { ...outcome.replayInput, mathConfigVersion: mathConfig.version };
+    rounds.add({ roundId, parentRoundId: mode === 'free' ? triggerRoundId : null, at: new Date().toISOString(), ...base, gameId: 'mahjong-cascade', mode, bet, stops: outcome.stops, replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, freeSpinsAwarded: outcome.freeSpinsAwarded, maxWinMultiplier: MAHJONG_MAX_WIN_MULTIPLIER, engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: mathConfig.version, stripRevision: mathConfig.stripRevision, betTransactionId, winTransactionId, status: 'win-pending' });
     const winCall = { action: 'win', ...base, payload: { ...base, transactionId: winTransactionId, roundId, amount: outcome.payout, currency: 'DEMO' } };
     let settlementPending = false;
     try { const body = await wallet(session.operatorId, 'win', winCall.payload); remember(session, body.balance); rounds.settle(roundId, body.balance); }
     catch (error) { settlementPending = true; queue({ ...winCall, lastError: error.message }); if (player.lastBalance !== null) player.lastBalance += outcome.payout; }
     save();
-    return json(res, 200, { gameId: 'mahjong-cascade', engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision, roundId, mode, bet, stops: outcome.stops, replayInput: outcome.replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, credits: player.lastBalance, settlementPending, freeSpinsAwarded: outcome.freeSpinsAwarded, freeSpins: player.freeSpins, freeSpinsFinished });
+    return json(res, 200, { gameId: 'mahjong-cascade', engineVersion: 'mahjong-engine-1.2.0', mathConfigVersion: mathConfig.version, stripRevision: mathConfig.stripRevision, roundId, mode, bet, stops: outcome.stops, replayInput, initialBoard: outcome.initialBoard, cascadeSteps: outcome.cascadeSteps, finalBoard: outcome.finalBoard, huCount: outcome.huCount, payout: outcome.payout, capped: outcome.capped, credits: player.lastBalance, settlementPending, freeSpinsAwarded: outcome.freeSpinsAwarded, freeSpins: player.freeSpins, freeSpinsFinished });
   } finally { busy.delete(key); }
 }
 

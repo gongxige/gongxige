@@ -138,15 +138,10 @@ assert.equal(mahjongLaunch.body.gameId, 'mahjong-cascade');
 assert.ok(mahjongLaunch.body.gameUrl.includes('/mahjong?token='));
 const mahjongToken = new URL(mahjongLaunch.body.gameUrl).searchParams.get('token');
 assert.ok(mahjongToken);
-const spinMahjong = () => spinOnce(mahjongToken, 10_000);
+const spinMahjong = () => spinOnce(mahjongToken, 100);
 let mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
 const mahjongRounds = [];
 for (let i = 0; i < 5; i += 1) {
-  // Top up the test-only virtual wallet before a paid round, without changing provider behavior.
-  if (mahjongBalance < 10_000) {
-    await signedPost(`${OP}/wallet/win`, { playerId: 'player-001', transactionId: `mahjong-check-credit-${i}`, roundId: `mahjong-check-credit-${i}`, amount: 100_000, currency: 'DEMO' }, opts);
-    mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
-  }
   const { status, body } = await spinMahjong();
   assert.equal(status, 200, body.error);
   assert.equal(body.gameId, 'mahjong-cascade');
@@ -168,10 +163,6 @@ step('麻将连连胡连续旋转：每局扣款或免费、派彩、对账、�
 // The two provider fault cases must remain correct for the new game too.
 while ((await getJson(`${API}/api/session?token=${mahjongToken}`)).body.freeSpins) await spinMahjong();
 step('麻将免费旋转已结清，开始故障验证');
-if (mahjongBalance < 10_000) {
-  await signedPost(`${OP}/wallet/win`, { playerId: 'player-001', transactionId: 'mahjong-fault-credit', roundId: 'mahjong-fault-credit', amount: 100_000, currency: 'DEMO' }, opts);
-  mahjongBalance = (await getJson(`${API}/api/session?token=${mahjongToken}`)).body.credits;
-}
 await setFault('win-down');
 const mahjongLate = await spinMahjong();
 assert.equal(mahjongLate.status, 200);

@@ -85,10 +85,10 @@ export function mathConfigForVersion(version: string): MahjongMathConfig {
   if (!config) throw new Error(`规则版本不可用：${version}`);
   return config;
 }
-// 保持阶段 9 的服务器默认值不变；STEP-34 才将新局切换到第 2 版。
-export const MAHJONG_MATH_CONFIG = MAHJONG_MATH_CONFIG_V1;
-export const TEMPORARY_STRIPS = MAHJONG_MATH_CONFIG_V1.strips;
-export const TEMPORARY_PAY_TABLE = MAHJONG_MATH_CONFIG_V1.payTable;
+// 第 2 版是所有新局的默认数学；第 1 版只能由局记录或在途免费局显式选择。
+export const MAHJONG_MATH_CONFIG = MAHJONG_MATH_CONFIG_V2;
+export const TEMPORARY_STRIPS = MAHJONG_MATH_CONFIG_V2.strips;
+export const TEMPORARY_PAY_TABLE = MAHJONG_MATH_CONFIG_V2.payTable;
 
 function mod(value: number, length: number): number { return ((value % length) + length) % length; }
 function cloneBoard(board: Board): Board { return board.map((column) => column.map((token) => ({ ...token }))); }
@@ -145,7 +145,7 @@ export function settleSpin(stops: Stops, bet: number, strips = TEMPORARY_STRIPS,
   return { stops, mode, initialBoard, cascadeSteps, finalBoard: cloneBoard(board), payout, capped, capRemainingAfter: capRemaining, huCount, freeSpinsAwarded, replayInput: { mode, bet, stops, capRemainingBefore } };
 }
 export function replaySpin(input: ReplayInput, strips?: readonly (readonly Token[])[], payTable?: PayTable): SpinOutcome {
-  const config = strips || payTable ? undefined : mathConfigForVersion(input.mathConfigVersion ?? MAHJONG_MATH_CONFIG_V1.version);
+  const config = strips || payTable ? undefined : mathConfigForVersion(input.mathConfigVersion ?? MAHJONG_MATH_CONFIG_V2.version);
   return settleSpin(input.stops, input.bet, strips ?? config!.strips, payTable ?? config!.payTable, { mode: input.mode, capRemainingBefore: input.capRemainingBefore });
 }
 export function freeStateFromPaidSpin(outcome: SpinOutcome): FreeSpinState | undefined { return outcome.mode === 'paid' && !outcome.capped && outcome.freeSpinsAwarded > 0 ? { bet: outcome.replayInput.bet, remaining: outcome.freeSpinsAwarded, parentTotalWin: outcome.payout, capped: false } : undefined; }
