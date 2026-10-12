@@ -151,7 +151,7 @@ function RulesModal({ bet, bets, onClose }: { bet: number; bets: readonly number
       <RuleSection title="游戏规则">
         <ul>
           <li>玉兔送财是一个 3 轴（第 1、3 轴 3 行，第 2 轴 4 行）的老虎机游戏，奖金符号最高可达总投注的 {fmt(allTiers[allTiers.length - 1])} 倍。</li>
-          <li>游戏共有 {PAYLINES.length} 条固定中奖线。总投注可选 {betRange} 虚拟积分（{bets.map(fmt).join(' / ')}），每线投注 = 总投注 ÷ {PAYLINES.length}。</li>
+          <li>游戏共有 {PAYLINES.length} 条固定中奖线。{bets.length ? <>总投注可选 {betRange} 虚拟积分（{bets.map(fmt).join(' / ')}），</> : null}每线投注 = 总投注 ÷ {PAYLINES.length}。</li>
           <li>总投注用画面下方的「−」「+」和「最大投注」设定；「余额」显示平台钱包里可用的虚拟积分。</li>
           <li>「自动旋转」可以按选择的次数自动进行游戏。</li>
           <li>中奖组合和奖金按「赔付表」派发：一条中奖线的奖金 = 赔付表上的倍数 × 每线投注。</li>
@@ -234,7 +234,7 @@ function RulesModal({ bet, bets, onClose }: { bet: number; bets: readonly number
       <RuleSection title="附加信息">
         <ul>
           <li>本游戏是演示平台，只使用虚拟积分，不涉及真实货币。</li>
-          <li>每一局的结果都由游戏服务器决定并记录，画面只是展示；网络中断时以服务器记录为准，赢分会自动到账。</li>
+          <li>每一局的结果都由游戏服务器决定并记录，画面只是展示；网络中断时以服务器记录为准，赢分会自动到账；没转完的财富旋转会在重新进入游戏后继续。</li>
           <li>每一局都有局号（画面最下方），可以在平台「游戏记录」里打开回放核对。当前规则版本：{MATH_CONFIG_VERSION}。</li>
           <li>本游戏没有声音和游戏内历史记录按钮；历史记录请到平台大厅的「游戏记录」查看。</li>
         </ul>
@@ -547,8 +547,11 @@ export default function JadeRabbitApp() {
         spaceRepeatRef.current = null;
       }
     };
+    // 空格在游戏画面里一律当作「旋转」：即使刚用鼠标点过某个按钮（焦点留在按钮上），也不会去触发那个按钮。
+    // 只有输入框、下拉框和规则弹窗里保留浏览器默认行为。
+    const keepsDefaultSpace = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input, select, textarea, .rabbit-modal'));
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || (event.target as HTMLElement).closest('input, select, textarea, button')) return;
+      if (event.code !== 'Space' || keepsDefaultSpace(event.target)) return;
       event.preventDefault();
       if (spaceHeldRef.current) return;
       if (LOCKED_PRESENTATIONS.has(presentationRef.current)) return;
@@ -559,7 +562,10 @@ export default function JadeRabbitApp() {
       }, 760);
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'Space') clearSpaceRepeat();
+      if (event.code !== 'Space') return;
+      // 按钮是在松开空格时被「点击」的，这里也要阻止，否则焦点所在的按钮（例如「极速」）会被切换。
+      if (!keepsDefaultSpace(event.target)) event.preventDefault();
+      clearSpaceRepeat();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
