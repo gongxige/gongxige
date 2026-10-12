@@ -203,7 +203,7 @@ async function adminApi(req, res, url) {
   if (req.method === 'GET' && roundReplay) {
     const { status, body } = await operatorRounds(roundReplay[1]);
     if (status !== 200 && status !== 404) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取回放');
-    return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl));
+    return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl, status === 200 ? body.replay : undefined));
   }
   if (req.method === 'GET' && path === '/reconciliation') return json(res, 200, { players: reconciliation(db) });
   if (req.method === 'GET' && path === '/faults') return json(res, 200, faultState());
@@ -311,7 +311,7 @@ const server = createServer(async (req, res) => {
       const { status, body } = await providerRounds(player.id, replayMatch[1]);
       if (status === 404) return fail(res, 404, 'ROUND_NOT_FOUND', '没有这个局号');
       if (status !== 200) return fail(res, 502, 'PROVIDER_UNAVAILABLE', body.error || '暂时无法读取回放');
-      return html(res, 200, replayPage(body.round, gameWebUrl));
+      return html(res, 200, replayPage(body.round, gameWebUrl, body.replay));
     }
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { location: 'http://127.0.0.1:4173/' }); return res.end(); }
     if (req.method === 'GET' && url.pathname === '/launch') return launch(url.searchParams.get('player'), res);

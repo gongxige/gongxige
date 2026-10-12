@@ -47,7 +47,6 @@ export const PAYTABLE = {
   CARROT: 4,
 } as const satisfies PayTable;
 
-/** 按设计文档冻结的 10 条线，坐标顺序均为左、中、右卷轴。 */
 /** 1.1.0 的旧线（其中第 4、5、7 条会跳过中列相邻格），只用于回放 1.1.0 的旧局。 */
 export const PAYLINES_V1 = [
   [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],

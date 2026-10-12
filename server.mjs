@@ -140,6 +140,13 @@ function publicConfig() {
   return { title: 'Wild Frontier', mode: 'provider-demo', protocol: SERVER_PROTOCOL, engineVersion: ENGINE_VERSION, allowedBets: ALLOWED_BETS, theoreticalRtp, maxWinMultiplier: state.settings.maxWinMultiplier, lobbyUrl };
 }
 
+/** 给浏览器看的模式状态：不带整轮回放输入（里面有全部 8 组停点）和封顶余额，避免提前泄露整轮结果。 */
+function publicFreeSpins(free) {
+  if (!free) return null;
+  const { replayInput, capRemaining, ...visible } = free;
+  return visible;
+}
+
 async function handleSession(session, res) {
   const player = playerState(session);
   try {
@@ -147,7 +154,7 @@ async function handleSession(session, res) {
     remember(session, body.balance);
     save();
     const game = gameFor(session.gameId ?? 'wild-frontier');
-    return json(res, 200, { playerName: session.playerName, gameId: game.gameId, allowedBets: game.allowedBets, credits: body.balance, freeSpins: player.freeSpins });
+    return json(res, 200, { playerName: session.playerName, gameId: game.gameId, allowedBets: game.allowedBets, credits: body.balance, freeSpins: publicFreeSpins(player.freeSpins) });
   } catch (error) {
     return json(res, 502, { error: `读取平台余额失败：${error.message}` });
   }
@@ -296,6 +303,14 @@ async function handleRabbitSpin(session, input, res) {
     const player = playerState(session);
     const free = player.freeSpins;
     const game = gameFor('jade-rabbit');
+    // 浏览器会说明这一局是付费还是财富旋转；和服务器状态对不上时不结算、不扣款，让浏览器重新读取状态。
+    // （例如最后一次财富旋转的回包丢了，浏览器以为还在模式里，不能把重试当成付费局扣款。）
+    if (input.mode === 'free' && (!free || (input.parentRoundId && input.parentRoundId !== free.parentRoundId))) {
+      return json(res, 409, { code: 'MODE_STATE_CHANGED', error: '玉兔模式状态已变化，请重新读取游戏。', freeSpins: publicFreeSpins(free) });
+    }
+    if (input.mode === 'paid' && free) {
+      return json(res, 409, { code: 'MODE_STATE_CHANGED', error: '还有未完成的财富旋转，请先继续玉兔模式。', freeSpins: publicFreeSpins(free) });
+    }
     const bet = free ? free.bet : Number(input.bet);
     if (!free && !game.isAllowedBet(bet)) return json(res, 400, { error: '无效投注档位。' });
     const base = { operatorId: session.operatorId, playerId: session.playerId };
@@ -349,10 +364,10 @@ async function handleRabbitSpin(session, input, res) {
       return json(res, 200, {
         gameId: 'jade-rabbit', engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION,
         stripRevision: RABBIT_STRIP_REVISION, roundId, parentRoundId: null, mode: 'paid', bet, stops: paid.stops,
-        grid: paid.board, lineWins: paid.lineWins, bonusWins: paid.bonusWins, payout: paid.payout, roundTotalWin: outcome.totalWin,
-        triggered: outcome.triggered, capped: paid.capped || outcome.capped, credits: player.lastBalance,
+        grid: paid.board, lineWins: paid.lineWins, bonusWins: paid.bonusWins, payout: paid.payout, roundTotalWin: paid.payout,
+        triggered: outcome.triggered, capped: paid.capped, credits: player.lastBalance,
         settlementPending: settlement.settlementPending, freeSpinsAwarded: outcome.modeSpins.length ? RABBIT_MODE_SPINS : 0,
-        freeSpins: player.freeSpins, freeSpinsFinished: null,
+        freeSpins: publicFreeSpins(player.freeSpins), freeSpinsFinished: null,
       });
     }
 
@@ -389,8 +404,8 @@ async function handleRabbitSpin(session, input, res) {
       gameId: 'jade-rabbit', engineVersion: replayInput.engineVersion, mathConfigVersion: replayInput.mathConfigVersion,
       stripRevision: replayInput.stripRevision, roundId, parentRoundId: free.parentRoundId, mode: 'free', bet: free.bet,
       modeIndex, stops: modeOutcome.stops, grid: modeOutcome.board, bonusWins: modeOutcome.bonusWins, payout: modeOutcome.payout,
-      roundTotalWin: fullOutcome.totalWin, capped: modeOutcome.capped, credits: player.lastBalance,
-      settlementPending: settlement.settlementPending, freeSpinsAwarded: 0, freeSpins: player.freeSpins, freeSpinsFinished,
+      roundTotalWin: free.totalWin, capped: modeOutcome.capped, credits: player.lastBalance,
+      settlementPending: settlement.settlementPending, freeSpinsAwarded: 0, freeSpins: publicFreeSpins(player.freeSpins), freeSpinsFinished,
     });
   } finally {
     busy.delete(key);
@@ -508,7 +523,7 @@ function handleRoundLookup(raw, req, res) {
     return json(res, 200, { round, replay: { gameId, payout: replayed.payout, freeSpinsAwarded: replayed.freeSpinsAwarded, cascadeSteps: gameId === 'mahjong-cascade' ? replayed.cascadeSteps : undefined, matches: replayed.payout === round.payout && round.engineVersion === expectedVersion } });
   }
   const records = rounds.list((round) => ownsRound(round), Math.min(Math.max(Number(limit) || 50, 1), 500))
-    .map((round) => ({ roundId: round.roundId, gameId: round.gameId ?? 'wild-frontier', at: round.at, bet: round.bet, payout: round.payout, ...(wholeOperator ? { playerId: round.playerId, mode: round.mode, status: round.status } : {}) }));
+    .map((round) => ({ roundId: round.roundId, gameId: round.gameId ?? 'wild-frontier', at: round.at, bet: round.bet, payout: round.payout, mode: round.mode ?? 'paid', parentRoundId: round.parentRoundId ?? null, modeIndex: round.modeIndex, ...(wholeOperator ? { playerId: round.playerId, status: round.status } : {}) }));
   return json(res, 200, { records });
 }
 

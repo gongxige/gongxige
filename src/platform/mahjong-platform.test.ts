@@ -61,7 +61,8 @@ async function playRabbit(cookie: string) {
 
 let admin = '';
 before(async () => {
-  const env = { ...process.env, API_PORT: String(apiPort), OPERATOR_PORT: String(port), PROVIDER_URL: apiBase, DATA_DIR: directory, ADMIN_PASSWORD };
+  // RABBIT_TRIGGER_ROLL=0：玉兔送财每个付费局都触发玉兔模式，便于测试模式状态校验。
+  const env = { ...process.env, API_PORT: String(apiPort), OPERATOR_PORT: String(port), PROVIDER_URL: apiBase, DATA_DIR: directory, ADMIN_PASSWORD, RABBIT_TRIGGER_ROLL: '0' };
   apiServer = spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' });
   server = spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' });
   for (let i = 0; i < 50; i += 1) {
@@ -133,6 +134,51 @@ describe('平台接入玉兔送财', () => {
     const replay = await request(`/api/game-records/${spin.roundId}/replay`, {}, alice);
     assert.equal(replay.status, 200);
     assert.match(replay.body.text, /玉兔送财/);
+  });
+
+  it('STEP-48：财富旋转请求和服务器状态对不上时返回 409、不扣款；不提前下发模式停点；玩家记录区分免费局', async () => {
+    const dave = await newPlayer('rabbit-dave');
+    const launch = await post('/games/jade-rabbit/launch', {}, dave);
+    const token = new URL(launch.body.gameUrl).searchParams.get('token');
+    const spinApi = async (body: Json) => {
+      const response = await fetch(`${apiBase}/api/spin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, bet: 100, ...body }) });
+      return { status: response.status, body: await response.json() as Json };
+    };
+    const balance = async () => (await request('/api/wallet', {}, dave)).body.balance as number;
+
+    const paid = await spinApi({ mode: 'paid' });
+    assert.equal(paid.status, 200);
+    assert.equal(paid.body.triggered, true);
+    assert.equal(paid.body.roundTotalWin, paid.body.payout, '付费局回包只给本局赢分，不提前给整轮总赢分');
+    assert.equal(JSON.stringify(paid.body.freeSpins).includes('modeStops'), false);
+    const session = await (await fetch(`${apiBase}/api/session?token=${token}`)).json();
+    assert.equal(JSON.stringify(session.freeSpins).includes('modeStops'), false, 'session 不带 8 组模式停点');
+    assert.equal(session.freeSpins.parentRoundId, paid.body.roundId);
+
+    const before = await balance();
+    assert.equal((await spinApi({ mode: 'paid' })).body.code, 'MODE_STATE_CHANGED', '模式没打完时付费请求被拒绝');
+    assert.equal((await spinApi({ mode: 'free', parentRoundId: 'someone-else' })).body.code, 'MODE_STATE_CHANGED');
+    assert.equal(await balance(), before, '被拒绝的请求不扣款');
+
+    for (let index = 0; index < 8; index += 1) {
+      const free = await spinApi({ mode: 'free', parentRoundId: paid.body.roundId });
+      assert.equal(free.status, 200);
+      assert.equal(free.body.mode, 'free');
+      assert.equal(free.body.modeIndex, index);
+    }
+    const afterMode = await balance();
+    const late = await spinApi({ mode: 'free', parentRoundId: paid.body.roundId });
+    assert.equal(late.status, 409, '最后一次财富旋转的回包丢失后重试，不会变成付费局');
+    assert.equal(late.body.code, 'MODE_STATE_CHANGED');
+    assert.equal(await balance(), afterMode, '重试不扣款');
+
+    const records = (await request('/api/game-records', {}, dave)).body.records as Json[];
+    const mine = records.filter((r) => r.roundId === paid.body.roundId || r.parentRoundId === paid.body.roundId);
+    assert.equal(mine.length, 9);
+    assert.equal(mine.filter((r) => r.mode === 'free').length, 8);
+    assert.deepEqual(mine.filter((r) => r.mode === 'free').map((r) => r.modeIndex).sort(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    const replay = await request(`/api/game-records/${paid.body.roundId}/replay`, {}, dave);
+    assert.match(replay.body.text, /已触发并转完 8 次财富旋转/);
   });
 
   it('后台的游戏记录和概览区分三款游戏，点局号能回放玉兔送财', async () => {

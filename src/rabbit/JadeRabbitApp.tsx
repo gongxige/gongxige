@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   BOARD_HEIGHTS,
   BONUS_MULTIPLIERS,
+  MATH_MODE_STRIPS,
+  MATH_STRIPS,
   MAX_WIN_MULTIPLIER,
   PAYLINES,
   PAYTABLE,
@@ -16,7 +18,7 @@ import { markLocalArtFailed, preloadLocalArt, useLocalArt } from './localArt.ts'
 import { openingBoard } from './openingBoard.ts';
 import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
 
-type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number } | null;
+type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number; parentRoundId?: string } | null;
 type Session = { playerName: string; gameId: string; allowedBets?: number[]; credits: number; freeSpins: FreeSpins };
 type SpinResult = {
   gameId: string;
@@ -40,12 +42,23 @@ type SpinResult = {
   modeIndex?: number;
 };
 
+/** 谁发起的旋转：玩家点击/空格、自动旋转、玉兔模式自己接着转。 */
+type SpinKind = 'manual' | 'auto' | 'mode';
+
 type RabbitPresentation = 'idle' | 'bonus-collect' | 'mode-trigger' | 'mode-intro' | 'mode-spin' | 'mode-collect' | 'mode-finale' | 'mode-total';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const fmt = (value: number) => value.toLocaleString('zh-CN');
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const EMPTY_TOKEN: Token = { symbolId: 'BLANK', stackGroupId: 'empty' };
+/** 这些画面在播放叠加动画，期间不接受新的旋转（按钮、空格、自动都一样）。 */
+const LOCKED_PRESENTATIONS: ReadonlySet<string> = new Set(['bonus-collect', 'mode-trigger', 'mode-intro', 'mode-collect', 'mode-finale', 'mode-total']);
+
+/** 规则页列出的牌匾档位直接取自正式轴带，避免列出实际不会出现的档位。 */
+const tiersOf = (strips: readonly (readonly Token[])[]) => [...new Set(strips.flat().filter((entry) => entry.symbolId === 'BONUS_PLATE').map((entry) => BONUS_MULTIPLIERS[entry.bonusTier ?? 0]))].sort((a, b) => a - b);
+const MAIN_TIERS = tiersOf(MATH_STRIPS);
+const MODE_TIERS = tiersOf(MATH_MODE_STRIPS);
+const fmtTiers = (tiers: readonly number[]) => tiers.map((tier) => `×${tier}`).join('、');
 
 const PAYTABLE_LABELS: Record<string, string> = {
   WILD: '玉云百搭', YUANBAO: '元宝', FU_BAG: '福袋', RED_ENVELOPE: '红包',
@@ -116,7 +129,7 @@ function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
     <section className="rabbit-modal">
       <div className="rabbit-modal-heading"><span>玉兔送财</span><button type="button" onClick={onClose} aria-label="关闭规则">×</button></div>
       <div className="rabbit-rule-tabs"><b>游戏规则</b><b>赔付表</b></div>
-      <p>3-4-3 三列盘面，共 10 条固定中奖线；每线从左到右连成三枚相同普通符号（百搭可替代），按最高赔付结算。奖金牌匾不参加线奖。</p>
+      <p>3-4-3 三列盘面，共 10 条固定中奖线；每线从左到右连成三枚相同普通符号（百搭可替代普通符号，但不能替代奖金牌匾），每线只按最高赔付结算一次。奖金牌匾不参加线奖。</p>
       <h3 className="rabbit-rule-subtitle">中奖线</h3>
       <div className="rabbit-payline-grid">{PAYLINES.map((line, index) => <figure key={index} aria-label={`第 ${index + 1} 条中奖线`}>
         <figcaption>{String(index + 1).padStart(2, '0')}</figcaption>
@@ -126,11 +139,12 @@ function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
         }))}</svg>
       </figure>)}</div>
       <div className="rabbit-paytable">
-        {Object.entries(PAYTABLE).map(([id, multiplier]) => <div key={id}><RabbitSymbol entry={{ symbolId: id as LineSymbolId | 'WILD', stackGroupId: `rules-${id}` }} bet={bet} /><span>{PAYTABLE_LABELS[id]}</span><strong>×{multiplier}</strong></div>)}
+        {Object.entries(PAYTABLE).map(([id, multiplier]) => <div key={id}><RabbitSymbol entry={{ symbolId: id as LineSymbolId | 'WILD', stackGroupId: `rules-${id}` }} bet={bet} /><span>{PAYTABLE_LABELS[id]}</span><strong>×{multiplier}</strong><small>= {fmt(Math.round(multiplier * bet / 10))}</small></div>)}
       </div>
+      <p className="rabbit-rule-note">赔付倍数按「每线投注」计算：每线投注 = 总投注 ÷ 10；按当前总投注 {fmt(bet)}，三连赔付为上面「=」后的数值。</p>
       <ul>
-        <li>盘面出现 5 个或以上奖金牌匾时，支付所有牌匾数值之和；档位为 ×0.5、×1、×2、×5、×10、×20、×50、×100、×250、×500。</li>
-        <li>奖金牌匾可能随机带来 8 次财富旋转，模式中只会出现牌匾和空白格。</li>
+        <li>盘面出现 5 个或以上奖金牌匾时，支付所有牌匾数值之和（牌匾数值 = 总投注 × 档位）。主游戏牌匾档位为 {fmtTiers(MAIN_TIERS)}，财富旋转牌匾档位为 {fmtTiers(MODE_TIERS)}。</li>
+        <li>每次付费旋转都有一个独立的小概率触发 8 次财富旋转，与盘面上的牌匾数量无关；财富旋转中只会出现牌匾和空白格，不会再次触发。</li>
         <li>本轮（含财富旋转）最高赢分为 {fmt(MAX_WIN_MULTIPLIER)} 倍投注；本页面只使用虚拟积分。</li>
       </ul>
       <p className="rabbit-rule-note">当前总投注 {fmt(bet)}；牌匾数值由服务器盘面中的档位决定。</p>
@@ -165,10 +179,17 @@ export default function JadeRabbitApp() {
   const [presentation, setPresentation] = useState<RabbitPresentation>('idle');
   const [modeTotalWin, setModeTotalWin] = useState(0);
   const [modeSpinNumber, setModeSpinNumber] = useState(0);
+  // 玉兔模式里已经有本局财富旋转的盘面（还没有时显示空白盘面）。
+  const [modeBoardShown, setModeBoardShown] = useState(false);
+  // 财富旋转请求失败后暂停自动接着转，等玩家点按钮继续。
+  const [modePaused, setModePaused] = useState(false);
+  const [lastRoundId, setLastRoundId] = useState('');
   const busyRef = useRef(false);
   const stopRequested = useRef(false);
   const autoRef = useRef(0);
-  const spinRef = useRef<(automatic?: boolean) => void>(() => {});
+  const spinRef = useRef<(kind?: SpinKind) => void>(() => {});
+  // 服务器结果已到、还在播放停轴时的结果；「立即停止」只能停在这个结果上。
+  const pendingResult = useRef<SpinResult | null>(null);
   const resultBonusWins = useRef<SpinResult['bonusWins']>([]);
   const bonusCollectNext = useRef<'idle' | 'mode-trigger'>('idle');
   // 最近一局付费旋转的盘面：玉兔模式结束后回到主游戏时恢复它，主游戏里不再留空白格。
@@ -199,7 +220,7 @@ export default function JadeRabbitApp() {
   useEffect(() => {
     if (!token) { setError('请从平台大厅进入玉兔送财。'); return; }
     api<Session>(`/api/session?token=${encodeURIComponent(token)}`).then((next) => {
-      setSession(next); setCredits(next.credits); setFreeSpins(next.freeSpins); setPresentation(next.freeSpins ? 'mode-spin' : 'idle'); setBet(next.freeSpins?.bet ?? next.allowedBets?.[0] ?? 0);
+      setSession(next); setCredits(next.credits); setFreeSpins(next.freeSpins); setPresentation(next.freeSpins ? 'mode-spin' : 'idle'); setModeBoardShown(false); setBet(next.freeSpins?.bet ?? next.allowedBets?.[0] ?? 0);
       if (next.freeSpins) setMessage(`财富旋转 · 剩余 ${next.freeSpins.remaining} 次`);
     }).catch((e: Error) => setError(e.message));
   }, []);
@@ -211,12 +232,13 @@ export default function JadeRabbitApp() {
 
   useEffect(() => {
     const lineWins = resultLineWins.current ?? [];
-    if (busy || lineWins.length === 0) { setActiveLine(null); return; }
+    // 进入玉兔模式后不再轮播触发局的中奖线。
+    if (busy || lineWins.length === 0 || presentation.startsWith('mode-')) { setActiveLine(null); return; }
     let index = 0;
     setActiveLine(lineWins[0]?.lineNumber ?? null);
     const timer = window.setInterval(() => { index = (index + 1) % lineWins.length; setActiveLine(lineWins[index]?.lineNumber ?? null); }, 1450);
     return () => window.clearInterval(timer);
-  }, [busy, win, board]);
+  }, [busy, win, board, presentation]);
 
   useEffect(() => {
     if (presentation !== 'bonus-collect') return;
@@ -252,10 +274,13 @@ export default function JadeRabbitApp() {
       resultLineWins.current = [];
       resultBonusWins.current = [];
       setBoard(mainBoardRef.current ?? openingBoard());
+      setWin(0);
+      setModeBoardShown(false);
+      setMessage(`财富旋转结束 · 本轮共赢 ${fmt(modeTotalWin)}（含触发局），可以继续旋转`);
       setPresentation('idle');
     }, 3_000);
     return () => window.clearTimeout(timer);
-  }, [presentation]);
+  }, [presentation, modeTotalWin]);
 
   async function animateResult(result: SpinResult, startedAt: number) {
     if (stopRequested.current) return;
@@ -263,8 +288,10 @@ export default function JadeRabbitApp() {
     await wait(Math.max(0, totalWait - (performance.now() - startedAt)));
     if (stopRequested.current) return;
     setBoard(result.grid);
+    if (result.mode === 'free') setModeBoardShown(true);
+    // 前两列已有 4 个牌匾时，最后一列「有可能」补足 5 个就亮期待蓝光（不提前暴露最后一列的结果）。
     const earlyBonusCount = result.grid.slice(0, 2).flat().filter((entry) => entry.symbolId === 'BONUS_PLATE').length;
-    const expectBonus = (result.bonusWins?.length ?? 0) >= 5 && earlyBonusCount >= 4;
+    const expectBonus = result.mode === 'paid' && earlyBonusCount === 4;
     for (let column = 0; column < BOARD_HEIGHTS.length; column += 1) {
       if (column === 2 && expectBonus) { setAnticipating(true); await wait(fast ? 260 : 620); }
       if (stopRequested.current) return;
@@ -274,14 +301,23 @@ export default function JadeRabbitApp() {
     }
   }
 
-  async function spin(automatic = false) {
-    if (presentationRef.current === 'bonus-collect' || presentationRef.current === 'mode-trigger' || presentationRef.current === 'mode-intro' || presentationRef.current === 'mode-collect' || presentationRef.current === 'mode-finale' || presentationRef.current === 'mode-total') return;
-    if (busyRef.current) { stopRequested.current = true; setSpinningReels([false, false, false]); setAnticipating(false); setMessage('立即停止，等待服务器结算…'); return; }
+  async function spin(kind: SpinKind = 'manual') {
+    if (LOCKED_PRESENTATIONS.has(presentationRef.current)) return;
+    if (busyRef.current) {
+      // 立即停止：结果还没回来时只记下请求，等结果到了直接停在新盘面上，不会先停在上一局的盘面。
+      stopRequested.current = true;
+      const arrived = pendingResult.current;
+      if (arrived) { setBoard(arrived.grid); if (arrived.mode === 'free') setModeBoardShown(true); setSpinningReels([false, false, false]); setAnticipating(false); }
+      setMessage(arrived ? '已停止' : '立即停止，等待服务器结算…');
+      return;
+    }
     if (!session || rules || error) return;
-    if (!automatic && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); setMessage('自动旋转已停止'); return; }
+    if (kind === 'manual' && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); setMessage('自动旋转已停止'); return; }
     const isFree = Boolean(freeSpins && freeSpins.remaining > 0);
     if (!isFree && credits < bet) { setMessage('余额不足，请回大厅充值'); return; }
-    if (automatic && autoRef.current > 0) { autoRef.current -= 1; setAutoRemaining(autoRef.current); }
+    if (kind === 'auto' && autoRef.current > 0) { autoRef.current -= 1; setAutoRemaining(autoRef.current); }
+    if (kind === 'manual') setModePaused(false);
+    pendingResult.current = null;
     busyRef.current = true; stopRequested.current = false; setBusy(true); setWin(0); setError(''); setActiveLine(null);
     resultLineWins.current = [];
     resultBonusWins.current = [];
@@ -290,11 +326,15 @@ export default function JadeRabbitApp() {
     setSpinningReels([true, true, true]);
     const startedAt = performance.now();
     try {
-      const result = await api<SpinResult>('/api/spin', { token, bet });
+      // 告诉服务器这一局是财富旋转还是付费局；状态对不上时服务器返回 409，不会把财富旋转的重试当成付费局扣款。
+      const result = await api<SpinResult>('/api/spin', { token, bet, mode: isFree ? 'free' : 'paid', ...(isFree && freeSpins?.parentRoundId ? { parentRoundId: freeSpins.parentRoundId } : {}) });
       if (result.gameId !== 'jade-rabbit') throw new Error('服务器返回了不匹配的游戏盘面。');
+      pendingResult.current = result;
       await animateResult(result, startedAt);
       setSpinningReels([false, false, false]); setAnticipating(false); setBoard(result.grid);
       if (result.mode === 'paid') mainBoardRef.current = result.grid;
+      if (result.mode === 'free') setModeBoardShown(true);
+      setLastRoundId(result.roundId);
       if (result.credits !== null) setCredits(result.credits);
       setBet(result.bet); setWin(result.payout); setFreeSpins(result.freeSpins); resultLineWins.current = result.lineWins ?? [];
       resultBonusWins.current = result.bonusWins ?? [];
@@ -302,8 +342,10 @@ export default function JadeRabbitApp() {
       if (result.freeSpinsFinished) setModeTotalWin(result.freeSpinsFinished.totalWin);
       if (result.bonusWins && result.bonusWins.length >= 5 && result.mode !== 'free') {
         bonusCollectNext.current = result.triggered ? 'mode-trigger' : 'idle';
+        if (result.triggered) setModeBoardShown(false);
         setPresentation('bonus-collect');
       } else if (result.triggered) {
+        setModeBoardShown(false);
         setPresentation('mode-trigger');
       } else if (result.mode === 'free') {
         setPresentation(result.bonusWins && result.bonusWins.length >= 5 ? 'mode-collect' : result.freeSpinsFinished ? 'mode-finale' : 'mode-spin');
@@ -311,8 +353,10 @@ export default function JadeRabbitApp() {
         setPresentation('idle');
       }
       if (result.settlementPending) setMessage('平台派彩稍有延迟，赢分会自动到账。');
-      else if (result.freeSpinsFinished) setMessage(`财富旋转结束 · 共赢 ${fmt(result.freeSpinsFinished.totalWin)}`);
+      else if (result.freeSpinsFinished) setMessage(`财富旋转结束 · 本轮共赢 ${fmt(result.freeSpinsFinished.totalWin)}（含触发局）`);
       else if (result.triggered) setMessage('恭喜触发 8 次财富旋转！');
+      // 触发玉兔模式时停止自动旋转（模式会自己接着转完 8 次）。
+      if (result.triggered && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); }
       else if (result.payout > 0) setMessage(`赢得 ${fmt(result.payout)}`);
       else setMessage(isFree ? '本次财富旋转未凑够 5 个牌匾' : '本局未中奖，再来一次');
       if (result.capped) { setMessage('本轮已达到 5000 倍封顶。'); autoRef.current = 0; setAutoRemaining(null); }
@@ -320,25 +364,43 @@ export default function JadeRabbitApp() {
       setSpinningReels([false, false, false]); setAnticipating(false);
       const err = e as Error & { status?: number };
       setMessage(err.status === 402 ? '余额不足，请回大厅充值' : err.message);
-      api<Session>(`/api/session?token=${encodeURIComponent(token)}`).then((next) => setCredits(next.credits)).catch(() => undefined);
+      // 出错时停止自动旋转，并按服务器的真实状态同步余额和玉兔模式。
+      if (autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); }
+      if (isFree) setModePaused(true);
+      api<Session>(`/api/session?token=${encodeURIComponent(token)}`).then((next) => {
+        setCredits(next.credits);
+        setFreeSpins(next.freeSpins);
+        if (next.freeSpins && !isFree) { setModeBoardShown(false); setPresentation('mode-spin'); setBet(next.freeSpins.bet); }
+        if (!next.freeSpins && isFree) {
+          setModePaused(false);
+          setBoard(mainBoardRef.current ?? openingBoard());
+          setModeBoardShown(false);
+          setPresentation('idle');
+          setMessage('玉兔模式已结束，可以继续旋转。');
+        } else if (next.freeSpins && isFree) {
+          setMessage(`财富旋转暂时失败（${err.message}），点「财富」按钮继续`);
+        }
+      }).catch(() => undefined);
     } finally {
+      pendingResult.current = null;
       busyRef.current = false; setBusy(false);
     }
   }
-  spinRef.current = (automatic = false) => { void spin(automatic); };
+  spinRef.current = (kind: SpinKind = 'manual') => { void spin(kind); };
 
   useEffect(() => {
-    if (busy || rules || error || !session || !freeSpins?.remaining || presentation !== 'mode-spin') return;
-    const timer = window.setTimeout(() => { void spinRef.current(); }, win > 0 ? 1450 : 720);
+    if (busy || rules || error || !session || !freeSpins?.remaining || presentation !== 'mode-spin' || modePaused) return;
+    const timer = window.setTimeout(() => { void spinRef.current('mode'); }, win > 0 ? 1450 : 720);
     return () => window.clearTimeout(timer);
-  }, [busy, rules, error, session, freeSpins, win, board, presentation]);
+  }, [busy, rules, error, session, freeSpins, win, board, presentation, modePaused]);
 
   useEffect(() => {
-    if (busy || rules || error || !session || inMode || autoRef.current <= 0 || autoRemaining === 0) return;
+    // 只在画面空闲时计时；牌匾收集等叠加动画结束回到 idle 后会重新计时，不会卡住。
+    if (busy || rules || error || !session || inMode || presentation !== 'idle' || autoRef.current <= 0 || autoRemaining === 0) return;
     if (credits < bet) { autoRef.current = 0; setAutoRemaining(null); setMessage('余额不足，自动旋转已停止'); return; }
-    const timer = window.setTimeout(() => { void spinRef.current(true); }, win > 0 ? 1000 : 420);
+    const timer = window.setTimeout(() => { void spinRef.current('auto'); }, win > 0 ? 1000 : 420);
     return () => window.clearTimeout(timer);
-  }, [busy, rules, error, session, inMode, autoRemaining, credits, bet, win, board]);
+  }, [busy, rules, error, session, inMode, presentation, autoRemaining, credits, bet, win, board]);
 
   useEffect(() => {
     const clearSpaceRepeat = () => {
@@ -352,7 +414,7 @@ export default function JadeRabbitApp() {
       if (event.code !== 'Space' || (event.target as HTMLElement).closest('input, select, textarea, button')) return;
       event.preventDefault();
       if (spaceHeldRef.current) return;
-      if (presentationRef.current === 'bonus-collect' || presentationRef.current === 'mode-trigger' || presentationRef.current === 'mode-intro' || presentationRef.current === 'mode-collect' || presentationRef.current === 'mode-finale' || presentationRef.current === 'mode-total') return;
+      if (LOCKED_PRESENTATIONS.has(presentationRef.current)) return;
       spaceHeldRef.current = true;
       spinRef.current();
       spaceRepeatRef.current = window.setInterval(() => {
@@ -384,7 +446,8 @@ export default function JadeRabbitApp() {
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
   const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;
-  const displayBoard = presentation === 'mode-spin' || presentation === 'mode-intro' || presentation === 'mode-finale' || presentation === 'mode-total'
+  // 玉兔模式里：还没有本局财富旋转盘面时显示空白盘面；有了就显示真实盘面（包括牌匾不足 5 个的局和最后的结束画面）。
+  const displayBoard = presentation === 'mode-intro' || (presentation.startsWith('mode-') && presentation !== 'mode-trigger' && !modeBoardShown)
     ? modeBlankBoard
     : board;
   const rollingSeeds = (inMode ? modeBlankBoard : board).map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
@@ -431,7 +494,7 @@ export default function JadeRabbitApp() {
       {presentation === 'mode-intro' && <div className="rabbit-mode-overlay rabbit-mode-intro" role="status"><b>8 次财富旋转</b><span>好运已经起航</span></div>}
       {presentation === 'mode-collect' && <div className="rabbit-mode-overlay rabbit-mode-collect" role="status"><b>第 {modeSpinNumber} 次收集</b><span>赢得 {fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</span></div>}
       {presentation === 'mode-finale' && <div className="rabbit-mode-overlay rabbit-mode-finale" role="status"><b>大奖</b><span>金币雨 · {fmt(modeTotalWin)}</span><i>{Array.from({ length: 18 }, (_, index) => <em key={index}>◆</em>)}</i></div>}
-      {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>共赢得 {fmt(modeTotalWin)}</b><span>财富旋转结束</span></div>}
+      {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>本轮共赢 {fmt(modeTotalWin)}</b><span>财富旋转结束（含触发局）</span></div>}
       {!layout && <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>}
       {inMode && !layout && <div className="rabbit-mode-badge">财富旋转 · 剩余 {freeSpins!.remaining} 次</div>}
       {error && <div className="rabbit-error" role="alert">{error} <a href="/">返回大厅</a></div>}
@@ -442,13 +505,13 @@ export default function JadeRabbitApp() {
           <button className="rabbit-max" type="button" disabled={!canAdjustBet || bets.length === 0} onClick={() => setBet(bets[bets.length - 1])}>最大投注</button>
           <label className="rabbit-auto"><span>自动</span><select value={autoCount} onChange={(event) => setAutoCount(event.target.value)} disabled={busy || inMode}><option value="5">5 次</option><option value="10">10 次</option><option value="25">25 次</option><option value="50">50 次</option></select></label>
           <button className={`rabbit-fast ${fast ? 'is-on' : ''}`} type="button" onClick={() => setFast((value) => !value)} aria-pressed={fast}>极速</button>
-          <button className={`rabbit-spin ${inMode ? 'is-mode' : ''}`} type="button" onClick={() => { void spin(); }} disabled={!session || (!inMode && credits < bet && !busy) || Boolean(error)}>{busy ? '立即停止' : inMode ? `财富 ${freeSpins!.remaining}` : '旋转'}</button>
+          <button className={`rabbit-spin ${inMode ? 'is-mode' : ''}`} type="button" onClick={() => { void spin(); }} disabled={!session || (!inMode && credits < bet && !busy) || Boolean(error) || LOCKED_PRESENTATIONS.has(presentation)}>{busy ? '立即停止' : inMode ? `财富 ${freeSpins!.remaining}` : '旋转'}</button>
           {!busy && !inMode && autoRef.current === 0 && <button className="rabbit-auto-start" type="button" onClick={() => { const count = Number(autoCount); if (credits < bet) { setMessage('余额不足，无法自动旋转'); return; } autoRef.current = count; setAutoRemaining(count); setMessage(`自动旋转 ${count} 次`); }}>自动旋转</button>}
           {autoRef.current > 0 && <button className="rabbit-auto-stop" type="button" onClick={() => { autoRef.current = 0; setAutoRemaining(null); setMessage('自动旋转已停止'); }}>停止自动 · {autoRemaining}</button>}
         </div>
         <p className="rabbit-message">{message}{autoRemaining !== null && autoRef.current > 0 ? ` · 自动剩余 ${autoRemaining}` : ''}</p>
       </section>
-      <p className="rabbit-demo-note">演示平台 · 仅虚拟积分 · 不涉及真实货币 · 局号 {busy ? '结算中' : '—'}</p>
+      <p className="rabbit-demo-note">演示平台 · 仅虚拟积分 · 不涉及真实货币 · 局号 {busy ? '结算中' : lastRoundId || '—'}</p>
       {rules && <RulesModal bet={bet} onClose={() => setRules(false)} />}
     </section>
   </main>;

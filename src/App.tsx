@@ -7,7 +7,11 @@ import JadeRabbitApp from './rabbit/JadeRabbitApp.tsx';
 type Player = { id: string; username: string; status: string };
 type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
 type WalletRecord = { kind: string; amount: number; status: string; createdAt: string };
-type GameRecord = { roundId: string; gameId?: string; at: string; bet: number; payout: number };
+type GameRecord = { roundId: string; gameId?: string; at: string; bet: number; payout: number; mode?: string; modeIndex?: number };
+/** 免费局（玉兔送财财富旋转、麻将免费旋转）不扣款，不显示成一次投注。 */
+const recordStake = (record: GameRecord) => record.mode === 'free'
+  ? (record.gameId === 'jade-rabbit' && record.modeIndex !== undefined ? `财富旋转第 ${record.modeIndex + 1} 次（免费）` : '免费旋转（不扣投注）')
+  : `投注 ${record.bet.toLocaleString('zh-CN')} DEMO`;
 const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡', 'jade-rabbit': '玉兔送财' };
 const LOBBY_GAMES = [
   { gameId: 'wild-frontier', title: 'Wild Frontier', art: '♜', sub: '1024 Ways · 虚拟积分体验' },
@@ -64,7 +68,7 @@ function WalletPage({ onBack }: { onBack: () => void }) {
 function GameRecordsPage({ onBack }: { onBack: () => void }) {
   const [records, setRecords] = useState<GameRecord[]>([]); const [message, setMessage] = useState('');
   useEffect(() => { platformFetch<{ records: GameRecord[] }>('/api/game-records').then(({ records: next }) => setRecords(next)).catch((error: Error) => setMessage(error.message)); }, []);
-  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">MY GAME HISTORY</p><h1>游戏记录</h1></div><button className="text-button" onClick={onBack}>返回大厅</button></header><section className="records-section"><p>仅显示当前登录账号的每一局；点击局号可在新页面查看回放。</p>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{records.length ? records.map((record) => <article className="record game-record" key={record.roundId}><b>{GAME_TITLES[record.gameId ?? 'wild-frontier'] ?? record.gameId} · {new Date(record.at).toLocaleString('zh-CN')}</b><span>投注 {record.bet.toLocaleString('zh-CN')} DEMO</span><em>赢分 {record.payout.toLocaleString('zh-CN')} DEMO</em><a href={`/api/game-records/${encodeURIComponent(record.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{record.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section></main>;
+  return <main className="platform-page"><Notice /><header className="lobby-header"><div><p className="eyebrow">MY GAME HISTORY</p><h1>游戏记录</h1></div><button className="text-button" onClick={onBack}>返回大厅</button></header><section className="records-section"><p>仅显示当前登录账号的每一局；点击局号可在新页面查看回放。</p>{message && <p className="form-message" role="status">{message}</p>}<div className="records-list">{records.length ? records.map((record) => <article className="record game-record" key={record.roundId}><b>{GAME_TITLES[record.gameId ?? 'wild-frontier'] ?? record.gameId} · {new Date(record.at).toLocaleString('zh-CN')}</b><span>{recordStake(record)}</span><em>赢分 {record.payout.toLocaleString('zh-CN')} DEMO</em><a href={`/api/game-records/${encodeURIComponent(record.roundId)}/replay`} target="_blank" rel="noreferrer">局号：{record.roundId}</a></article>) : <p>暂无游戏记录。</p>}</div></section></main>;
 }
 
 function ProfilePage({ onBack }: { onBack: () => void }) {

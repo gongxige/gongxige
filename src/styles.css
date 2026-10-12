@@ -420,7 +420,7 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-reel-column > .rabbit-cell > .rabbit-symbol-image { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rabbit-rolling-track .rabbit-symbol-image { height: auto; aspect-ratio: 120 / 88; }
 /* 阶段 12 / STEP-46：本机背景图（931×1230）铺在标题栏和控制栏之间，按 layout.json 的百分比摆放卷轴、提示条和吉祥物；缺图时不加 has-art，仍是上面自己画的画面 */
-.rabbit-stage.has-art { overflow: clip; container-type: size; background: #120b12; --art-top: max(44px, 7cqh); --art-bottom: max(150px, 19cqh); --art-w: min(100cqw, calc((100cqh - var(--art-top) - var(--art-bottom)) * var(--art-ratio))); --art-h: calc(var(--art-w) / var(--art-ratio)); }
+.rabbit-stage.has-art { overflow: clip; container-type: size; background: #120b12; --art-top: max(44px, 7cqh); --art-bottom: max(190px, 22cqh); --art-w: min(100cqw, calc((100cqh - var(--art-top) - var(--art-bottom)) * var(--art-ratio))); --art-h: calc(var(--art-w) / var(--art-ratio)); }
 .rabbit-stage.has-art.is-mode { background: #120b12; }
 .has-art .rabbit-header { height: var(--art-top); }
 .rabbit-art { position: absolute; top: var(--art-top); left: 50%; z-index: 2; width: var(--art-w); height: var(--art-h); transform: translateX(-50%); container-type: inline-size; background: #2a1033 center / 100% 100% no-repeat; box-shadow: 0 0 3cqw #000c; }
@@ -473,3 +473,32 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-payline-grid rect { fill: #6d7280; stroke: #2b2d36; stroke-width: .6; }
 .rabbit-payline-grid rect.is-on { fill: #ffb45c; }
 @media (max-width: 520px) { .rabbit-rule-subtitle { font-size: 3cqw; } .rabbit-payline-grid figcaption { font-size: 2.4cqw; } .rabbit-payline-grid svg { max-width: 12cqw; } }
+/* STEP-48：bug 修正 */
+/* 7. 模式叠加画面铺满整个舞台：inset:0 时不能再 translateX(-50%) */
+.rabbit-mode-overlay { left: 0; transform: none; animation-name: rabbit-overlay-fill-in; }
+@keyframes rabbit-overlay-fill-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+/* 17. 停下的格子里，SVG 和图片一样按格子大小完整缩放，不按宽度撑高被裁掉 */
+.rabbit-reel-column > .rabbit-cell > svg.rabbit-symbol { position: absolute; inset: 4%; width: 92%; height: 92%; }
+.rabbit-reel-column > .rabbit-cell > .rabbit-plate-image { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* 8. 没有背景图的横屏：卷轴区按行高收住，线号圆点按高度缩小，控制栏可换行 */
+.rabbit-machine { grid-template-rows: minmax(0, 1fr); }
+.rabbit-reels { min-height: 0; }
+@media (max-height: 520px) and (orientation: landscape) {
+  .rabbit-stage:not(.has-art) .rabbit-line-rail span { width: min(5cqw, 4.6cqh); height: min(5cqw, 4.6cqh); font-size: min(2.1cqw, 2.4cqh); }
+  .rabbit-stage:not(.has-art) .rabbit-line-rail { height: 96%; }
+  .rabbit-stage:not(.has-art) { container-type: size; }
+  .rabbit-stage:not(.has-art) .rabbit-roof { top: 16%; height: 26%; width: 18%; }
+  .rabbit-stage:not(.has-art) .rabbit-mascot { width: 13cqw; bottom: 10%; }
+  .rabbit-stage:not(.has-art) .rabbit-machine { left: 22%; right: 22%; top: 17%; height: 55%; }
+  .rabbit-stage:not(.has-art) .rabbit-controls { gap: .5cqw; }
+  .rabbit-stage:not(.has-art) .rabbit-controls > * { flex-shrink: 1; min-width: 0; }
+  .rabbit-stage:not(.has-art) .rabbit-max, .rabbit-stage:not(.has-art) .rabbit-fast, .rabbit-stage:not(.has-art) .rabbit-auto-start, .rabbit-stage:not(.has-art) .rabbit-auto-stop { padding: 0 .6cqw; font-size: 1.6cqw; }
+  .rabbit-stage:not(.has-art) .rabbit-spin { min-width: 12cqw; font-size: 3cqw; }
+  .rabbit-stage:not(.has-art) .rabbit-bottom { height: 24%; }
+}
+/* 14. 规则页：赔付表显示按当前投注的三连金额；弹窗间距收紧 */
+.rabbit-paytable small { color: #b9e3d8; font-size: 1.35cqw; }
+.rabbit-modal { padding: 2.6cqw 3cqw; }
+.rabbit-payline-grid { margin-bottom: 1.2cqw; }
+.rabbit-primary { margin-top: 1.2cqw; }
+@media (max-width: 520px) { .rabbit-paytable small { font-size: 2.2cqw; } }

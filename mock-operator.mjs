@@ -240,7 +240,7 @@ const server = createServer(async (req, res) => {
     // Round replay: asks the game server with a signature, only for this operator's own player.
     if (req.method === 'GET' && url.pathname === '/admin/replay') {
       const { status, body } = await signedPost(`${providerUrl}/provider/rounds`, { playerId: url.searchParams.get('player'), roundId: url.searchParams.get('round') }, { secret, operatorId });
-      return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl));
+      return html(res, status, replayPage(status === 200 ? body.round : null, gameWebUrl, status === 200 ? body.replay : undefined));
     }
     if (req.method === 'GET' && url.pathname === '/admin/state') return json(res, 200, { players: Object.fromEntries(Object.keys(state.players).map((id) => [id, { ...state.players[id], ...reconcile(id) }])), transactions: state.order.map((id) => state.transactions[id]) });
     if (req.method === 'POST' && url.pathname.startsWith('/admin/')) {
