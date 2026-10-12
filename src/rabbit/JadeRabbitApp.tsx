@@ -33,7 +33,10 @@ type SpinResult = {
   freeSpinsAwarded: number;
   freeSpins: FreeSpins;
   freeSpinsFinished: { played: number; totalWin: number } | null;
+  modeIndex?: number;
 };
+
+type RabbitPresentation = 'idle' | 'bonus-collect' | 'mode-trigger' | 'mode-intro' | 'mode-spin' | 'mode-collect' | 'mode-finale' | 'mode-total';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const fmt = (value: number) => value.toLocaleString('zh-CN');
@@ -142,16 +145,24 @@ export default function JadeRabbitApp() {
   const [busy, setBusy] = useState(false);
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [tickerIndex, setTickerIndex] = useState(0);
+  const [presentation, setPresentation] = useState<RabbitPresentation>('idle');
+  const [modeTotalWin, setModeTotalWin] = useState(0);
+  const [modeSpinNumber, setModeSpinNumber] = useState(0);
   const busyRef = useRef(false);
   const stopRequested = useRef(false);
   const autoRef = useRef(0);
   const spinRef = useRef<(automatic?: boolean) => void>(() => {});
+  const resultBonusWins = useRef<SpinResult['bonusWins']>([]);
   const spaceRepeatRef = useRef<number | null>(null);
   const spaceHeldRef = useRef(false);
   const bets = session?.allowedBets ?? [];
   const inMode = Boolean(freeSpins && freeSpins.remaining > 0);
   const spinning = spinningReels.some(Boolean);
-  const mood = busy ? 'spin' : inMode ? 'mode' : win > 0 ? 'win' : 'idle';
+  const mood = presentation === 'mode-finale' || presentation === 'mode-total'
+    ? 'mode'
+    : presentation === 'mode-trigger' || presentation === 'mode-intro' || presentation === 'mode-collect'
+      ? 'mode'
+      : busy ? 'spin' : win > 0 ? 'win' : 'idle';
   const resultLineWins = useRef<SpinResult['lineWins']>([]);
   const activeWinCells = useMemo(() => {
     const line = resultLineWins.current?.find((entry) => entry.lineNumber === activeLine);
@@ -162,7 +173,7 @@ export default function JadeRabbitApp() {
   useEffect(() => {
     if (!token) { setError('请从平台大厅进入玉兔送财。'); return; }
     api<Session>(`/api/session?token=${encodeURIComponent(token)}`).then((next) => {
-      setSession(next); setCredits(next.credits); setFreeSpins(next.freeSpins); setBet(next.freeSpins?.bet ?? next.allowedBets?.[0] ?? 0);
+      setSession(next); setCredits(next.credits); setFreeSpins(next.freeSpins); setPresentation(next.freeSpins ? 'mode-spin' : 'idle'); setBet(next.freeSpins?.bet ?? next.allowedBets?.[0] ?? 0);
       if (next.freeSpins) setMessage(`财富旋转 · 剩余 ${next.freeSpins.remaining} 次`);
     }).catch((e: Error) => setError(e.message));
   }, []);
@@ -180,6 +191,23 @@ export default function JadeRabbitApp() {
     const timer = window.setInterval(() => { index = (index + 1) % lineWins.length; setActiveLine(lineWins[index]?.lineNumber ?? null); }, 1450);
     return () => window.clearInterval(timer);
   }, [busy, win, board]);
+
+  useEffect(() => {
+    if (presentation !== 'mode-trigger') return;
+    const introTimer = window.setTimeout(() => setPresentation('mode-intro'), 900);
+    const spinTimer = window.setTimeout(() => setPresentation('mode-spin'), 2_300);
+    return () => { window.clearTimeout(introTimer); window.clearTimeout(spinTimer); };
+  }, [presentation]);
+
+  useEffect(() => {
+    if (presentation === 'mode-collect') {
+      const timer = window.setTimeout(() => setPresentation(freeSpins?.remaining ? 'mode-spin' : 'mode-finale'), 1_300);
+      return () => window.clearTimeout(timer);
+    }
+    if (presentation !== 'mode-finale') return;
+    const timer = window.setTimeout(() => setPresentation('mode-total'), 2_600);
+    return () => window.clearTimeout(timer);
+  }, [presentation]);
 
   async function animateResult(result: SpinResult, startedAt: number) {
     if (stopRequested.current) return;
@@ -207,6 +235,7 @@ export default function JadeRabbitApp() {
     if (automatic && autoRef.current > 0) { autoRef.current -= 1; setAutoRemaining(autoRef.current); }
     busyRef.current = true; stopRequested.current = false; setBusy(true); setWin(0); setError(''); setActiveLine(null);
     resultLineWins.current = [];
+    resultBonusWins.current = [];
     setMessage(isFree ? `财富旋转 · 剩余 ${freeSpins!.remaining} 次` : '旋转中…');
     if (!isFree) setCredits((value) => value - bet);
     setSpinningReels([true, true, true]);
@@ -218,6 +247,19 @@ export default function JadeRabbitApp() {
       setSpinningReels([false, false, false]); setAnticipating(false); setBoard(result.grid);
       if (result.credits !== null) setCredits(result.credits);
       setBet(result.bet); setWin(result.payout); setFreeSpins(result.freeSpins); resultLineWins.current = result.lineWins ?? [];
+      resultBonusWins.current = result.bonusWins ?? [];
+      if (result.mode === 'free' && result.modeIndex !== undefined) setModeSpinNumber(result.modeIndex + 1);
+      if (result.freeSpinsFinished) setModeTotalWin(result.freeSpinsFinished.totalWin);
+      if (result.bonusWins && result.bonusWins.length >= 5 && result.mode !== 'free') {
+        setPresentation('bonus-collect');
+        window.setTimeout(() => setPresentation(result.triggered ? 'mode-trigger' : 'idle'), 1_850);
+      } else if (result.triggered) {
+        setPresentation('mode-trigger');
+      } else if (result.mode === 'free') {
+        setPresentation(result.bonusWins && result.bonusWins.length >= 5 ? 'mode-collect' : result.freeSpinsFinished ? 'mode-finale' : 'mode-spin');
+      } else {
+        setPresentation('idle');
+      }
       if (result.settlementPending) setMessage('平台派彩稍有延迟，赢分会自动到账。');
       else if (result.freeSpinsFinished) setMessage(`财富旋转结束 · 共赢 ${fmt(result.freeSpinsFinished.totalWin)}`);
       else if (result.triggered) setMessage('恭喜触发 8 次财富旋转！');
@@ -236,10 +278,10 @@ export default function JadeRabbitApp() {
   spinRef.current = (automatic = false) => { void spin(automatic); };
 
   useEffect(() => {
-    if (busy || rules || error || !session || !freeSpins?.remaining) return;
+    if (busy || rules || error || !session || !freeSpins?.remaining || presentation !== 'mode-spin') return;
     const timer = window.setTimeout(() => { void spinRef.current(); }, win > 0 ? 1450 : 720);
     return () => window.clearTimeout(timer);
-  }, [busy, rules, error, session, freeSpins, win, board]);
+  }, [busy, rules, error, session, freeSpins, win, board, presentation]);
 
   useEffect(() => {
     if (busy || rules || error || !session || inMode || autoRef.current <= 0 || autoRemaining === 0) return;
@@ -283,10 +325,15 @@ export default function JadeRabbitApp() {
   const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
-  const rollingSeeds = board.map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
+  const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;
+  const displayBoard = presentation === 'mode-intro' || presentation === 'mode-finale' || presentation === 'mode-total'
+    ? modeBlankBoard
+    : board;
+  const rollingSeeds = (inMode ? modeBlankBoard : board).map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
+  const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
 
   return <main className="rabbit-shell">
-    <section className={`rabbit-stage ${inMode ? 'is-mode' : ''} ${spinning ? 'is-spinning' : ''}`} aria-label="玉兔送财游戏画面">
+    <section className={`rabbit-stage ${inMode || presentation.startsWith('mode-') ? 'is-mode' : ''} ${presentation} ${spinning ? 'is-spinning' : ''}`} aria-label="玉兔送财游戏画面">
       <div className="rabbit-sky"><span /><span /><span /><span /></div>
       <header className="rabbit-header">
         <a className="rabbit-home" href="/" aria-label="返回大厅">⌂</a>
@@ -302,13 +349,19 @@ export default function JadeRabbitApp() {
       <div className="rabbit-machine">
         <div className="rabbit-line-rail left">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
         <div className="rabbit-reels" aria-label="3-4-3 服务器盘面">
-          {board.map((column, x) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
-            {spinningReels[x] ? <RollingColumn height={BOARD_HEIGHTS[x]} bet={bet} seed={rollingSeeds[x]} /> : column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
+          {displayBoard.map((column, x) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
+            {spinningReels[x] ? <RollingColumn height={BOARD_HEIGHTS[x]} bet={bet} seed={rollingSeeds[x]} /> : column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
           </div>)}
           <svg className="rabbit-line-layer" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">{linePath && <polyline points={linePath} />}</svg>
         </div>
         <div className="rabbit-line-rail right">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
       </div>
+      {presentation === 'bonus-collect' && <div className="rabbit-bonus-callout" role="status"><b>奖金牌一起发光</b><strong>{fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</strong></div>}
+      {presentation === 'mode-trigger' && <div className="rabbit-mode-overlay rabbit-mode-trigger" role="status"><b>玉兔送财</b><span>触发财富旋转</span></div>}
+      {presentation === 'mode-intro' && <div className="rabbit-mode-overlay rabbit-mode-intro" role="status"><b>8 次财富旋转</b><span>好运已经起航</span></div>}
+      {presentation === 'mode-collect' && <div className="rabbit-mode-overlay rabbit-mode-collect" role="status"><b>第 {modeSpinNumber} 次收集</b><span>赢得 {fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</span></div>}
+      {presentation === 'mode-finale' && <div className="rabbit-mode-overlay rabbit-mode-finale" role="status"><b>大奖</b><span>金币雨 · {fmt(modeTotalWin)}</span><i>{Array.from({ length: 18 }, (_, index) => <em key={index}>◆</em>)}</i></div>}
+      {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>共赢得 {fmt(modeTotalWin)}</b><span>财富旋转结束</span></div>}
       <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>
       {inMode && <div className="rabbit-mode-badge">财富旋转 · 剩余 {freeSpins!.remaining} 次</div>}
       {error && <div className="rabbit-error" role="alert">{error} <a href="/">返回大厅</a></div>}
