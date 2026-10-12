@@ -205,9 +205,14 @@ export default function JadeRabbitApp() {
 
   useEffect(() => {
     if (presentation !== 'mode-trigger') return;
-    const introTimer = window.setTimeout(() => setPresentation('mode-intro'), 900);
-    const spinTimer = window.setTimeout(() => setPresentation('mode-spin'), 2_300);
-    return () => { window.clearTimeout(introTimer); window.clearTimeout(spinTimer); };
+    const timer = window.setTimeout(() => setPresentation('mode-intro'), 900);
+    return () => window.clearTimeout(timer);
+  }, [presentation]);
+
+  useEffect(() => {
+    if (presentation !== 'mode-intro') return;
+    const timer = window.setTimeout(() => setPresentation('mode-spin'), 1_400);
+    return () => window.clearTimeout(timer);
   }, [presentation]);
 
   useEffect(() => {
