@@ -352,11 +352,11 @@ export default function JadeRabbitApp() {
       } else {
         setPresentation('idle');
       }
+      // 触发玉兔模式时停止自动旋转（模式会自己接着转完 8 次）。单独一句，不能插进下面的提示文案链。
+      if (result.triggered && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); }
       if (result.settlementPending) setMessage('平台派彩稍有延迟，赢分会自动到账。');
       else if (result.freeSpinsFinished) setMessage(`财富旋转结束 · 本轮共赢 ${fmt(result.freeSpinsFinished.totalWin)}（含触发局）`);
       else if (result.triggered) setMessage('恭喜触发 8 次财富旋转！');
-      // 触发玉兔模式时停止自动旋转（模式会自己接着转完 8 次）。
-      if (result.triggered && autoRef.current > 0) { autoRef.current = 0; setAutoRemaining(null); }
       else if (result.payout > 0) setMessage(`赢得 ${fmt(result.payout)}`);
       else setMessage(isFree ? '本次财富旋转未凑够 5 个牌匾' : '本局未中奖，再来一次');
       if (result.capped) { setMessage('本轮已达到 5000 倍封顶。'); autoRef.current = 0; setAutoRemaining(null); }
