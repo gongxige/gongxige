@@ -280,7 +280,7 @@ export default function JadeRabbitApp() {
     };
   }, []);
 
-  const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / 4) * 100}`).join(' ') : '';
+  const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
   const rollingSeeds = board.map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
