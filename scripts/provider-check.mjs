@@ -20,7 +20,7 @@ const API_PORT = OP_PORT + 1;
 const OP = `http://127.0.0.1:${OP_PORT}`;
 const API = `http://127.0.0.1:${API_PORT}`;
 const ADMIN_PASSWORD = randomBytes(12).toString('base64url');
-const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', BET_TIMEOUT_MS: '500', SLOW_BET_MS: '700' };
+const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: mkdtempSync(join(tmpdir(), 'provider-check-')), OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, STATE_FILE: 'game-server-state.json', BET_TIMEOUT_MS: '500', SLOW_BET_MS: '700', RABBIT_TRIGGER_ROLL: '0' };
 const children = [spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
 process.on('exit', () => children.forEach((c) => c.kill()));
 
@@ -183,6 +183,91 @@ s = await opState();
 assert.equal(s.players['player-001'].balance, mahjongBeforeSlow);
 assert.ok(s.players['player-001'].ok);
 step('麻将连连胡派彩故障进入补发，扣款超时自动回滚且对账正确');
+
+// Jade Rabbit uses the same wallet flow, while its free spins are persisted
+// as zero-bet child rounds under one paid parent round. The fixed trigger is
+// test-only so the check does not spend an unbounded number of paid spins
+// waiting for a 0.745% random event.
+const rabbitLaunch = await signedPost(`${API}/provider/launch`, { playerId: 'player-001', gameId: 'jade-rabbit' }, opts);
+assert.equal(rabbitLaunch.status, 200);
+assert.equal(rabbitLaunch.body.gameId, 'jade-rabbit');
+assert.ok(rabbitLaunch.body.gameUrl.includes('/jade-rabbit?token='));
+const rabbitToken = new URL(rabbitLaunch.body.gameUrl).searchParams.get('token');
+assert.ok(rabbitToken);
+const spinRabbit = (token = rabbitToken) => spinOnce(token, 100);
+let rabbitCredits = (await getJson(`${API}/api/session?token=${rabbitToken}`)).body.credits;
+const rabbitRounds = [];
+let rabbitFreeRounds = 0;
+
+const rabbitPaid = await spinRabbit();
+assert.equal(rabbitPaid.status, 200, rabbitPaid.body.error);
+assert.equal(rabbitPaid.body.gameId, 'jade-rabbit');
+assert.equal(rabbitPaid.body.mode, 'paid');
+assert.equal(rabbitPaid.body.triggered, true);
+assert.equal(rabbitPaid.body.credits, rabbitCredits - rabbitPaid.body.bet + rabbitPaid.body.payout);
+rabbitCredits = rabbitPaid.body.credits;
+rabbitRounds.push(rabbitPaid.body.roundId);
+assert.equal(rabbitPaid.body.freeSpins.remaining, 8);
+
+// A new launch/session must see the persisted mode state and continue it.
+const rabbitRefreshLaunch = await signedPost(`${API}/provider/launch`, { playerId: 'player-001', gameId: 'jade-rabbit' }, opts);
+assert.equal(rabbitRefreshLaunch.status, 200);
+const rabbitRefreshToken = new URL(rabbitRefreshLaunch.body.gameUrl).searchParams.get('token');
+const rabbitRefreshSession = (await getJson(`${API}/api/session?token=${rabbitRefreshToken}`)).body;
+assert.equal(rabbitRefreshSession.gameId, 'jade-rabbit');
+assert.equal(rabbitRefreshSession.freeSpins.remaining, 8);
+for (let i = 0; i < 8; i += 1) {
+  const { status, body } = await spinRabbit(rabbitRefreshToken);
+  assert.equal(status, 200, body.error);
+  assert.equal(body.gameId, 'jade-rabbit');
+  assert.equal(body.mode, 'free');
+  assert.equal(body.credits, rabbitCredits + body.payout, `rabbit free round ${body.roundId}`);
+  rabbitCredits = body.credits;
+  rabbitRounds.push(body.roundId);
+  rabbitFreeRounds += 1;
+}
+assert.equal((await getJson(`${API}/api/session?token=${rabbitRefreshToken}`)).body.freeSpins, null);
+assert.equal((await opState()).players['player-001'].balance, rabbitCredits);
+assert.ok((await opState()).players['player-001'].ok, 'rabbit reconciliation');
+
+for (const id of rabbitRounds) {
+  const { status, body } = await lookupRound(id, 'player-001');
+  assert.equal(status, 200);
+  assert.equal(body.round.gameId, 'jade-rabbit');
+  assert.equal(body.replay.matches, true, `rabbit replay ${id}`);
+  assert.equal(body.replay.roundComplete, true, `rabbit full replay ${id}`);
+}
+step(`玉兔送财：付费父局扣一次款，刷新后继续 ${rabbitFreeRounds} 次零扣款模式局；对账和每局整轮回放一致`);
+
+// Both provider fault cases must also hold for Jade Rabbit. The fixed test
+// trigger makes this paid round start a fresh, deterministic mode sequence.
+await setFault('win-down');
+const rabbitLate = await spinRabbit(rabbitRefreshToken);
+assert.equal(rabbitLate.status, 200);
+assert.equal(rabbitLate.body.settlementPending, true);
+assert.equal(rabbitLate.body.mode, 'paid');
+await setFault('none');
+for (let i = 0; i < 8; i += 1) {
+  const mode = await spinRabbit(rabbitRefreshToken);
+  assert.equal(mode.status, 200, mode.body.error);
+  rabbitRounds.push(mode.body.roundId);
+}
+for (let i = 0; i < 40 && (await lookupRound(rabbitLate.body.roundId, 'player-001')).body.round.status !== 'settled'; i += 1) await sleep(500);
+assert.equal((await lookupRound(rabbitLate.body.roundId, 'player-001')).body.round.status, 'settled');
+assert.ok((await opState()).players['player-001'].ok);
+step('玉兔送财派彩故障：付费父局和模式子局照常完成，待派彩自动补发且对账正确');
+
+const rabbitBeforeSlow = (await opState()).players['player-001'].balance;
+await setFault('slow-bet');
+const rabbitSlow = await spinRabbit(rabbitRefreshToken);
+assert.equal(rabbitSlow.status, 502);
+assert.equal(rabbitSlow.body.code, 'BET_UNCONFIRMED');
+await sleep(1200);
+s = await opState();
+assert.equal(s.players['player-001'].balance, rabbitBeforeSlow);
+assert.ok(s.players['player-001'].ok);
+assert.ok(s.transactions.some((t) => t.type === 'refund' && t.amount === 100));
+step('玉兔送财扣款超时：父局取消并自动回滚，余额不变且对账正确');
 
 // Not enough money: the operator refuses, nothing is recorded as played.
 await signedPost(`${OP}/wallet/bet`, { playerId: 'player-002', transactionId: 'drain', roundId: 'drain', amount: (await opState()).players['player-002'].balance }, opts);

@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALLOWED_BETS, ENGINE_VERSION, computeRtp, isAllowedBet, replaySpin, spin } from './src/engine/index.ts';
 import { MAHJONG_MATH_CONFIG, MAHJONG_MATH_CONFIG_V1, MAX_WIN_MULTIPLIER as MAHJONG_MAX_WIN_MULTIPLIER, mathConfigForVersion, replaySpin as replayMahjongSpin, settleSpin as settleMahjongSpin } from './src/mahjong/engine/index.ts';
+import { ENGINE_VERSION as RABBIT_ENGINE_VERSION, MATH_CONFIG_VERSION as RABBIT_MATH_CONFIG_VERSION, MATH_MODE_STRIPS as RABBIT_MODE_STRIPS, MATH_STRIPS as RABBIT_STRIPS, MAX_WIN_MULTIPLIER as RABBIT_MAX_WIN_MULTIPLIER, MODE_SPINS as RABBIT_MODE_SPINS, STRIP_REVISION as RABBIT_STRIP_REVISION, isModeTriggered as isRabbitModeTriggered, replayRound as replayRabbitRound, settleRound as settleRabbitRound, settleSpin as settleRabbitSpin } from './src/rabbit/engine/index.ts';
 import { json, parseJson, readRaw, signedPost, verify, writeJsonAtomic } from './server/http.mjs';
 import { openRoundLog } from './server/rounds.mjs';
 
@@ -61,6 +62,11 @@ const GAMES = {
     gameId: 'mahjong-cascade', title: '麻将连连胡', engineVersion: 'mahjong-engine-1.2.0',
     mathConfigVersion: MAHJONG_MATH_CONFIG.version, stripRevision: MAHJONG_MATH_CONFIG.stripRevision,
     allowedBets: [100, 200, 500, 1_000, 2_000], isAllowedBet: (bet) => [100, 200, 500, 1_000, 2_000].includes(bet), launchPath: '/mahjong',
+  },
+  'jade-rabbit': {
+    gameId: 'jade-rabbit', title: '玉兔送财', engineVersion: RABBIT_ENGINE_VERSION,
+    mathConfigVersion: RABBIT_MATH_CONFIG_VERSION, stripRevision: RABBIT_STRIP_REVISION,
+    allowedBets: [100, 200, 500, 1_000, 2_000], isAllowedBet: (bet) => [100, 200, 500, 1_000, 2_000].includes(bet), launchPath: '/jade-rabbit',
   },
 };
 const gameFor = (gameId) => GAMES[gameId] ?? null;
@@ -149,6 +155,7 @@ async function handleSession(session, res) {
 
 async function handleSpin(session, input, res) {
   if (session.gameId === 'mahjong-cascade') return handleMahjongSpin(session, input, res);
+  if (session.gameId === 'jade-rabbit') return handleRabbitSpin(session, input, res);
   const key = playerKey(session);
   if (busy.has(key)) return json(res, 409, { error: '上一局还在处理中。' });
   busy.add(key);
@@ -245,6 +252,151 @@ async function handleSpin(session, input, res) {
   }
 }
 
+function rabbitRandomRoll() {
+  return randomInt(1_000_000_000) / 1_000_000_000;
+}
+
+function rabbitStops() {
+  return [
+    randomInt(RABBIT_STRIPS[0].length),
+    randomInt(RABBIT_STRIPS[1].length),
+    randomInt(RABBIT_STRIPS[2].length),
+  ];
+}
+
+function rabbitModeStops() {
+  return Array.from({ length: RABBIT_MODE_SPINS }, () => [
+    randomInt(RABBIT_MODE_STRIPS[0].length),
+    randomInt(RABBIT_MODE_STRIPS[1].length),
+    randomInt(RABBIT_MODE_STRIPS[2].length),
+  ]);
+}
+
+async function payRabbitRound(session, player, roundId, payout) {
+  const base = { operatorId: session.operatorId, playerId: session.playerId, gameId: 'jade-rabbit' };
+  const winTransactionId = `${roundId}-win`;
+  const winCall = { action: 'win', ...base, payload: { ...base, transactionId: winTransactionId, roundId, amount: payout, currency: 'DEMO' } };
+  try {
+    const body = await wallet(session.operatorId, 'win', winCall.payload);
+    remember(session, body.balance);
+    rounds.settle(roundId, body.balance);
+    return { winTransactionId, settlementPending: false };
+  } catch (error) {
+    queue({ ...winCall, lastError: error.message });
+    if (player.lastBalance !== null) player.lastBalance += payout;
+    return { winTransactionId, settlementPending: true };
+  }
+}
+
+async function handleRabbitSpin(session, input, res) {
+  const key = playerKey(session);
+  if (busy.has(key)) return json(res, 409, { error: '上一局还在处理中。' });
+  busy.add(key);
+  try {
+    const player = playerState(session);
+    const free = player.freeSpins;
+    const game = gameFor('jade-rabbit');
+    const bet = free ? free.bet : Number(input.bet);
+    if (!free && !game.isAllowedBet(bet)) return json(res, 400, { error: '无效投注档位。' });
+    const base = { operatorId: session.operatorId, playerId: session.playerId };
+
+    if (!free) {
+      const roundId = newRoundId();
+      const betTransactionId = `${roundId}-bet`;
+      try {
+        const body = await wallet(session.operatorId, 'bet', { ...base, transactionId: betTransactionId, roundId, amount: bet, currency: 'DEMO' }, BET_DELAYS, BET_TIMEOUT_MS);
+        remember(session, body.balance);
+      } catch (error) {
+        if (error.definitive) return json(res, error.status === 402 ? 402 : 400, { error: error.message, code: error.code });
+        const refund = { action: 'refund', ...base, gameId: 'jade-rabbit', payload: { ...base, transactionId: `${roundId}-refund`, refTransactionId: betTransactionId, roundId } };
+        try { remember(session, (await wallet(session.operatorId, 'refund', refund.payload)).balance); }
+        catch (refundError) { queue({ ...refund, lastError: refundError.message }); }
+        save();
+        return json(res, 502, { error: '平台没有及时确认扣款，本局已取消（如已扣款会自动退回）。', code: 'BET_UNCONFIRMED' });
+      }
+
+      const paidStops = rabbitStops();
+      const forcedRabbitRoll = process.env.RABBIT_TRIGGER_ROLL;
+      const triggerRoll = forcedRabbitRoll === undefined ? rabbitRandomRoll() : Number(forcedRabbitRoll);
+      const paidCandidate = settleRabbitSpin(paidStops, bet, RABBIT_STRIPS);
+      const trigger = isRabbitModeTriggered(triggerRoll) && paidCandidate.payout < bet * RABBIT_MAX_WIN_MULTIPLIER;
+      const replayInput = {
+        gameId: 'jade-rabbit', engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION,
+        stripRevision: RABBIT_STRIP_REVISION, bet, parentRoundId: roundId, mode: 'paid', triggerRoll,
+        paidStops, modeStops: trigger ? rabbitModeStops() : [], capRemainingBefore: bet * RABBIT_MAX_WIN_MULTIPLIER,
+      };
+      const outcome = settleRabbitRound(replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+      const paid = outcome.paidSpin;
+      const winTransactionId = `${roundId}-win`;
+      rounds.add({
+        roundId, parentRoundId: null, at: new Date().toISOString(), ...base, gameId: 'jade-rabbit', mode: 'paid', bet,
+        stops: paid.stops, replayInput, paidSpin: paid, modeSpins: outcome.modeSpins, triggered: outcome.triggered,
+        payout: paid.payout, roundTotalWin: outcome.totalWin, capped: outcome.capped, freeSpinsAwarded: outcome.modeSpins.length ? RABBIT_MODE_SPINS : 0,
+        engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION, stripRevision: RABBIT_STRIP_REVISION,
+        maxWinMultiplier: RABBIT_MAX_WIN_MULTIPLIER, betTransactionId, winTransactionId, status: 'win-pending',
+      });
+      if (outcome.modeSpins.length > 0) {
+        player.freeSpins = {
+          parentRoundId: roundId, bet, remaining: outcome.modeSpins.length, played: 0, totalWin: paid.payout,
+          capRemaining: paid.capRemainingAfter, replayInput,
+        };
+      } else {
+        player.freeSpins = null;
+      }
+      save();
+      const settlement = await payRabbitRound(session, player, roundId, paid.payout);
+      save();
+      return json(res, 200, {
+        gameId: 'jade-rabbit', engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION,
+        stripRevision: RABBIT_STRIP_REVISION, roundId, parentRoundId: null, mode: 'paid', bet, stops: paid.stops,
+        grid: paid.board, lineWins: paid.lineWins, bonusWins: paid.bonusWins, payout: paid.payout, roundTotalWin: outcome.totalWin,
+        triggered: outcome.triggered, capped: paid.capped || outcome.capped, credits: player.lastBalance,
+        settlementPending: settlement.settlementPending, freeSpinsAwarded: outcome.modeSpins.length ? RABBIT_MODE_SPINS : 0,
+        freeSpins: player.freeSpins, freeSpinsFinished: null,
+      });
+    }
+
+    const fullOutcome = replayRabbitRound(free.replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+    const modeIndex = free.played;
+    const modeOutcome = fullOutcome.modeSpins[modeIndex];
+    if (!modeOutcome) {
+      player.freeSpins = null;
+      save();
+      return json(res, 409, { error: '玉兔模式状态已结束，请重新读取游戏。' });
+    }
+    const roundId = newRoundId();
+    const winTransactionId = `${roundId}-win`;
+    const replayInput = free.replayInput;
+    rounds.add({
+      roundId, parentRoundId: free.parentRoundId, at: new Date().toISOString(), ...base, gameId: 'jade-rabbit', mode: 'free', bet: free.bet,
+      stops: modeOutcome.stops, modeIndex, replayInput, modeSpin: modeOutcome, payout: modeOutcome.payout,
+      roundTotalWin: fullOutcome.totalWin, capped: modeOutcome.capped, freeSpinsAwarded: 0,
+      engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION, stripRevision: RABBIT_STRIP_REVISION,
+      maxWinMultiplier: RABBIT_MAX_WIN_MULTIPLIER, betTransactionId: null, winTransactionId, status: 'win-pending',
+    });
+    free.played += 1;
+    free.remaining = Math.max(0, free.remaining - 1);
+    free.totalWin += modeOutcome.payout;
+    free.capRemaining = modeOutcome.capRemainingAfter;
+    const freeSpinsFinished = free.remaining === 0 || modeOutcome.capped
+      ? { played: free.played, totalWin: free.totalWin }
+      : null;
+    if (freeSpinsFinished) player.freeSpins = null;
+    save();
+    const settlement = await payRabbitRound(session, player, roundId, modeOutcome.payout);
+    save();
+    return json(res, 200, {
+      gameId: 'jade-rabbit', engineVersion: RABBIT_ENGINE_VERSION, mathConfigVersion: RABBIT_MATH_CONFIG_VERSION,
+      stripRevision: RABBIT_STRIP_REVISION, roundId, parentRoundId: free.parentRoundId, mode: 'free', bet: free.bet,
+      modeIndex, stops: modeOutcome.stops, grid: modeOutcome.board, bonusWins: modeOutcome.bonusWins, payout: modeOutcome.payout,
+      roundTotalWin: fullOutcome.totalWin, capped: modeOutcome.capped, credits: player.lastBalance,
+      settlementPending: settlement.settlementPending, freeSpinsAwarded: 0, freeSpins: player.freeSpins, freeSpinsFinished,
+    });
+  } finally {
+    busy.delete(key);
+  }
+}
+
 async function handleMahjongSpin(session, input, res) {
   const key = playerKey(session);
   if (busy.has(key)) return json(res, 409, { error: 'Previous round is still being processed.' });
@@ -327,6 +479,28 @@ function handleRoundLookup(raw, req, res) {
     const round = rounds.get(String(roundId));
     if (!ownsRound(round)) return json(res, 404, { error: '没有这个局号' });
     const gameId = round.gameId ?? 'wild-frontier';
+    if (gameId === 'jade-rabbit') {
+      try {
+        const replayed = replayRabbitRound(round.replayInput, RABBIT_STRIPS, RABBIT_MODE_STRIPS);
+        const parentRoundId = round.parentRoundId ?? round.roundId;
+        const related = rounds.list((candidate) => candidate.gameId === 'jade-rabbit' && (candidate.roundId === parentRoundId || candidate.parentRoundId === parentRoundId), 50);
+        const recordedTotal = related.reduce((total, candidate) => total + candidate.payout, 0);
+        const segment = round.mode === 'free' ? replayed.modeSpins[round.modeIndex] : replayed.paidSpin;
+        const segmentMatches = Boolean(segment) && segment.payout === round.payout && JSON.stringify(segment.stops) === JSON.stringify(round.stops);
+        const fullRoundMatches = recordedTotal === replayed.totalWin && related.length === 1 + replayed.modeSpins.length;
+        return json(res, 200, {
+          round,
+          replay: {
+            gameId, payout: segment?.payout ?? 0, totalPayout: replayed.totalWin,
+            freeSpinsAwarded: replayed.modeSpins.length ? RABBIT_MODE_SPINS : 0,
+            triggered: replayed.triggered, paidSpin: replayed.paidSpin, modeSpins: replayed.modeSpins,
+            roundComplete: fullRoundMatches, matches: segmentMatches && (fullRoundMatches || related.length < 1 + replayed.modeSpins.length),
+          },
+        });
+      } catch (error) {
+        return json(res, 200, { round, replay: { gameId, matches: false, error: error.message } });
+      }
+    }
     const replayed = gameId === 'mahjong-cascade'
       ? replayMahjongSpin({ ...round.replayInput, mathConfigVersion: round.mathConfigVersion })
       : replaySpin({ bet: round.bet, mode: round.mode, stops: round.stops, multipliers: round.multipliers }, round.maxWinMultiplier);
