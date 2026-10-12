@@ -1,11 +1,12 @@
-/**
- * 玉兔送财 STEP-37 纯逻辑引擎。
- *
- * 本步只负责主游戏的 3-4-3 盘面、固定中奖线、百搭和线奖。
- * 奖金牌匾、玉兔模式、封顶和回放会在后续步骤加入。
- */
+/** 玉兔送财纯逻辑引擎：主旋转、奖金牌匾、玉兔模式、封顶和回放。 */
 
 export const BOARD_HEIGHTS = [3, 4, 3] as const;
+export const MODE_SPINS = 8;
+export const MAX_WIN_MULTIPLIER = 5_000;
+export const MODE_TRIGGER_PROBABILITY = 0.0125;
+export const ENGINE_VERSION = 'jade-rabbit-engine-1.0.0';
+export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.0.0';
+export const STRIP_REVISION = 'jade-rabbit-strip-1.0.0';
 
 export type LineSymbolId =
   | 'YUANBAO'
@@ -14,12 +15,15 @@ export type LineSymbolId =
   | 'COPPER_COIN'
   | 'FIRECRACKER'
   | 'CARROT';
-export type SymbolId = LineSymbolId | 'WILD';
+export type BonusTier = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type SymbolId = LineSymbolId | 'WILD' | 'BONUS_PLATE' | 'BLANK';
 
 export type Token = Readonly<{
   readonly symbolId: SymbolId;
   /** 连续相同的轴带格可共享此 ID；它只影响叠放视觉，不影响结算。 */
   readonly stackGroupId: string;
+  /** 奖金牌匾的档位；只有 BONUS_PLATE 必须填写。 */
+  readonly bonusTier?: BonusTier;
 }>;
 export type Strip = readonly Token[];
 export type ReelStrips = readonly [Strip, Strip, Strip];
@@ -28,6 +32,8 @@ export type Coordinate = Readonly<{ x: 0 | 1 | 2; y: number }>;
 export type Board = readonly [readonly Token[], readonly Token[], readonly Token[]];
 
 export type PayTable = Readonly<Partial<Record<SymbolId, number>>>;
+
+export const BONUS_MULTIPLIERS = [0.5, 1, 2, 5, 10, 20, 50, 100, 250, 500] as const;
 
 export const PAYTABLE = {
   WILD: 200,
@@ -53,8 +59,8 @@ export const PAYLINES = [
   [{ x: 0, y: 2 }, { x: 1, y: 3 }, { x: 2, y: 2 }],
 ] as const satisfies readonly (readonly [Coordinate, Coordinate, Coordinate])[];
 
-function token(symbolId: SymbolId, stackGroupId: string): Token {
-  return { symbolId, stackGroupId };
+function token(symbolId: SymbolId, stackGroupId: string, bonusTier?: BonusTier): Token {
+  return bonusTier === undefined ? { symbolId, stackGroupId } : { symbolId, stackGroupId, bonusTier };
 }
 
 /**
@@ -66,18 +72,26 @@ export const TEMPORARY_STRIPS: ReelStrips = [
     token('YUANBAO', 'L-Y-0'), token('YUANBAO', 'L-Y-0'), token('YUANBAO', 'L-Y-0'),
     token('WILD', 'L-W-0'), token('WILD', 'L-W-0'),
     token('CARROT', 'L-C-0'), token('FU_BAG', 'L-F-0'), token('COPPER_COIN', 'L-CU-0'),
+    token('BONUS_PLATE', 'L-B-0', 0), token('BONUS_PLATE', 'L-B-1', 1),
   ],
   [
     token('FU_BAG', 'M-F-0'), token('FU_BAG', 'M-F-0'),
     token('RED_ENVELOPE', 'M-R-0'), token('RED_ENVELOPE', 'M-R-0'),
     token('WILD', 'M-W-0'), token('WILD', 'M-W-0'), token('FIRECRACKER', 'M-FI-0'),
-    token('CARROT', 'M-C-0'), token('YUANBAO', 'M-Y-0'),
+    token('CARROT', 'M-C-0'), token('YUANBAO', 'M-Y-0'), token('BONUS_PLATE', 'M-B-0', 2),
   ],
   [
     token('CARROT', 'R-C-0'), token('CARROT', 'R-C-0'), token('CARROT', 'R-C-0'),
     token('YUANBAO', 'R-Y-0'), token('FU_BAG', 'R-F-0'), token('COPPER_COIN', 'R-CU-0'),
-    token('RED_ENVELOPE', 'R-R-0'), token('WILD', 'R-W-0'),
+    token('RED_ENVELOPE', 'R-R-0'), token('WILD', 'R-W-0'), token('BONUS_PLATE', 'R-B-0', 3),
   ],
+];
+
+/** 玉兔模式专用轴带；除奖金牌匾和空白格外不允许出现其他符号。 */
+export const TEMPORARY_MODE_STRIPS: ReelStrips = [
+  [token('BONUS_PLATE', 'ML-0', 0), token('BLANK', 'ML-1'), token('BLANK', 'ML-2'), token('BONUS_PLATE', 'ML-3', 1), token('BLANK', 'ML-4')],
+  [token('BLANK', 'MM-0'), token('BONUS_PLATE', 'MM-1', 2), token('BONUS_PLATE', 'MM-2', 3), token('BLANK', 'MM-3'), token('BONUS_PLATE', 'MM-4', 4), token('BLANK', 'MM-5')],
+  [token('BLANK', 'MR-0'), token('BONUS_PLATE', 'MR-1', 0), token('BLANK', 'MR-2'), token('BONUS_PLATE', 'MR-3', 1), token('BLANK', 'MR-4')],
 ];
 
 export interface LineWin {
@@ -89,11 +103,66 @@ export interface LineWin {
   readonly payout: number;
 }
 
+export interface BonusWin {
+  readonly coordinates: Readonly<{ x: 0 | 1 | 2; y: number }>;
+  readonly tier: BonusTier;
+  readonly multiplier: number;
+  readonly value: number;
+}
+
 export interface SpinOutcome {
   readonly stops: Stops;
   readonly board: Board;
   readonly lineWins: readonly LineWin[];
+  readonly bonusWins: readonly BonusWin[];
+  /** 未封顶前的本次主旋转候选派彩。 */
+  readonly bonusPayout: number;
   readonly payout: number;
+}
+
+export interface ReplayInput {
+  readonly gameId: 'jade-rabbit';
+  readonly engineVersion: string;
+  readonly mathConfigVersion: string;
+  readonly stripRevision: string;
+  readonly bet: number;
+  readonly parentRoundId: string;
+  readonly mode: 'paid';
+  readonly triggerRoll: number;
+  readonly paidStops: Stops;
+  readonly modeStops: readonly Stops[];
+  readonly capRemainingBefore: number;
+}
+
+export type RoundReplayInput = ReplayInput;
+
+export interface RoundSpinOutcome extends SpinOutcome {
+  readonly candidatePayout: number;
+  readonly capped: boolean;
+  readonly capRemainingBefore: number;
+  readonly capRemainingAfter: number;
+}
+
+export interface ModeSpinOutcome {
+  readonly stops: Stops;
+  readonly board: Board;
+  readonly bonusWins: readonly BonusWin[];
+  readonly candidatePayout: number;
+  readonly payout: number;
+  readonly capped: boolean;
+  readonly capRemainingBefore: number;
+  readonly capRemainingAfter: number;
+}
+
+export interface RoundOutcome {
+  readonly replayInput: ReplayInput;
+  readonly paidSpin: RoundSpinOutcome;
+  readonly modeSpins: readonly ModeSpinOutcome[];
+  readonly triggered: boolean;
+  readonly totalWin: number;
+  readonly cap: number;
+  readonly capped: boolean;
+  readonly remainingModeSpins: number;
 }
 
 function mod(value: number, length: number): number {
@@ -110,6 +179,8 @@ function assertBoard(board: readonly (readonly Token[])[]): asserts board is Boa
     if (column.length !== BOARD_HEIGHTS[x]) throw new Error(`第 ${x + 1} 条卷轴高度不正确`);
     column.forEach((entry) => {
       if (!entry.stackGroupId || !Number.isFinite(entry.stackGroupId.length)) throw new Error('轴带格缺少叠放组');
+      if (entry.symbolId === 'BONUS_PLATE' && !isBonusTier(entry.bonusTier)) throw new Error('奖金牌匾缺少有效档位');
+      if (entry.symbolId !== 'BONUS_PLATE' && entry.bonusTier !== undefined) throw new Error('只有奖金牌匾可以带数值档位');
     });
   });
 }
@@ -121,7 +192,40 @@ function assertPayTable(payTable: PayTable): void {
 }
 
 function isLineSymbol(symbolId: SymbolId): symbolId is LineSymbolId {
-  return symbolId !== 'WILD';
+  return symbolId === 'YUANBAO' || symbolId === 'FU_BAG' || symbolId === 'RED_ENVELOPE'
+    || symbolId === 'COPPER_COIN' || symbolId === 'FIRECRACKER' || symbolId === 'CARROT';
+}
+
+function isBonusTier(value: number | undefined): value is BonusTier {
+  return value !== undefined && Number.isInteger(value) && value >= 0 && value < BONUS_MULTIPLIERS.length;
+}
+
+function assertStops(stops: readonly number[]): asserts stops is Stops {
+  if (stops.length !== 3 || !stops.every(Number.isInteger)) throw new Error('停点必须是三个整数');
+}
+
+function assertStrips(strips: ReelStrips): void {
+  if (strips.length !== BOARD_HEIGHTS.length) throw new Error('需要三条轴带');
+  strips.forEach((strip, x) => {
+    if (strip.length === 0) throw new Error(`第 ${x + 1} 条轴带不能为空`);
+    strip.forEach((entry) => {
+      if (entry.symbolId === 'BLANK') throw new Error('主游戏轴带不能含有空白格');
+      if (entry.symbolId === 'BONUS_PLATE' && !isBonusTier(entry.bonusTier)) throw new Error('奖金牌匾缺少有效档位');
+      if (entry.symbolId !== 'BONUS_PLATE' && entry.bonusTier !== undefined) throw new Error('只有奖金牌匾可以带数值档位');
+    });
+  });
+}
+
+function assertModeStrips(strips: ReelStrips): void {
+  if (strips.length !== BOARD_HEIGHTS.length) throw new Error('需要三条玉兔模式轴带');
+  strips.forEach((strip, x) => {
+    if (strip.length === 0) throw new Error(`玉兔模式第 ${x + 1} 条轴带不能为空`);
+    strip.forEach((entry) => {
+      if (entry.symbolId !== 'BONUS_PLATE' && entry.symbolId !== 'BLANK') throw new Error('玉兔模式轴带只能含奖金牌匾和空白格');
+      if (entry.symbolId === 'BONUS_PLATE' && !isBonusTier(entry.bonusTier)) throw new Error('模式奖金牌匾缺少有效档位');
+      if (entry.symbolId === 'BLANK' && entry.bonusTier !== undefined) throw new Error('空白格不能带数值档位');
+    });
+  });
 }
 
 /** 正数按“舍入到最近整数，.5 向上”处理。 */
@@ -131,7 +235,7 @@ function roundHalfUp(value: number): number {
 
 export function boardFromStops(strips: ReelStrips, stops: Stops): Board {
   if (strips.length !== BOARD_HEIGHTS.length) throw new Error('需要三条轴带');
-  if (stops.length !== BOARD_HEIGHTS.length || !stops.every(Number.isInteger)) throw new Error('停点必须是三个整数');
+  assertStops(stops);
   strips.forEach((strip, x) => {
     if (strip.length === 0) throw new Error(`第 ${x + 1} 条轴带不能为空`);
   });
@@ -141,6 +245,32 @@ export function boardFromStops(strips: ReelStrips, stops: Stops): Board {
     (_, y) => ({ ...strips[x][mod(stops[x] + y, strips[x].length)] }),
   );
   return [columnAt(0), columnAt(1), columnAt(2)];
+}
+
+function bonusValue(tier: BonusTier, bet: number): number {
+  return roundHalfUp(BONUS_MULTIPLIERS[tier] * bet);
+}
+
+/** 按固定盘面顺序读取所有奖金牌匾；百搭不会被计入。 */
+export function evaluateBonusPlates(board: Board, bet: number): readonly BonusWin[] {
+  assertBet(bet);
+  assertBoard(board);
+  return board.flatMap((column, x) => column.flatMap((entry, y) => {
+    const tier = entry.bonusTier;
+    if (entry.symbolId !== 'BONUS_PLATE' || !isBonusTier(tier)) return [];
+    return [{
+      coordinates: { x: x as 0 | 1 | 2, y },
+      tier,
+      multiplier: BONUS_MULTIPLIERS[tier],
+      value: bonusValue(tier, bet),
+    }];
+  }));
+}
+
+export const evaluateBonuses = evaluateBonusPlates;
+
+function bonusPayout(bonusWins: readonly BonusWin[]): number {
+  return bonusWins.length >= 5 ? bonusWins.reduce((total, win) => total + win.value, 0) : 0;
 }
 
 function lineCandidates(symbols: readonly [SymbolId, SymbolId, SymbolId]): readonly SymbolId[] {
@@ -177,12 +307,134 @@ export function evaluateLines(board: Board, bet: number, payTable: PayTable = PA
 }
 
 export function settleSpin(stops: Stops, bet: number, strips: ReelStrips = TEMPORARY_STRIPS, payTable: PayTable = PAYTABLE): SpinOutcome {
+  assertBet(bet);
+  assertStrips(strips);
   const board = boardFromStops(strips, stops);
   const lineWins = evaluateLines(board, bet, payTable);
+  const bonusWins = evaluateBonusPlates(board, bet);
+  const bonusPayoutValue = bonusPayout(bonusWins);
   return {
     stops: [...stops] as Stops,
     board,
     lineWins,
-    payout: lineWins.reduce((total, win) => total + win.payout, 0),
+    bonusWins,
+    bonusPayout: bonusPayoutValue,
+    payout: lineWins.reduce((total, win) => total + win.payout, 0) + bonusPayoutValue,
   };
 }
+
+function cloneReplayInput(input: ReplayInput): ReplayInput {
+  return {
+    ...input,
+    paidStops: [...input.paidStops] as Stops,
+    modeStops: input.modeStops.map((stops) => [...stops] as Stops),
+  };
+}
+
+function validateReplayInput(input: ReplayInput): void {
+  if (input.gameId !== 'jade-rabbit') throw new Error('回放游戏类型不正确');
+  if (input.mode !== 'paid') throw new Error('玉兔送财回放必须从付费旋转开始');
+  if (!input.parentRoundId) throw new Error('回放缺少父局号');
+  if (input.engineVersion !== ENGINE_VERSION) throw new Error(`引擎版本不可用：${input.engineVersion}`);
+  if (input.mathConfigVersion !== MATH_CONFIG_VERSION) throw new Error(`数学版本不可用：${input.mathConfigVersion}`);
+  if (input.stripRevision !== STRIP_REVISION) throw new Error(`轴带版本不可用：${input.stripRevision}`);
+  assertBet(input.bet);
+  assertStops(input.paidStops);
+  if (!Number.isFinite(input.triggerRoll) || input.triggerRoll < 0 || input.triggerRoll >= 1) throw new Error('触发抽样必须在 [0, 1) 内');
+  if (!Number.isInteger(input.capRemainingBefore) || input.capRemainingBefore < 0) throw new Error('封顶余额必须为非负整数');
+  if (input.modeStops.length > MODE_SPINS) throw new Error('玉兔模式最多保存八组停点');
+  input.modeStops.forEach(assertStops);
+}
+
+function capSpin(spin: SpinOutcome, capRemainingBefore: number): RoundSpinOutcome {
+  let capRemaining = capRemainingBefore;
+  const cappedLineWins = spin.lineWins.map((win) => {
+    const payout = Math.min(win.payout, capRemaining);
+    capRemaining -= payout;
+    return { ...win, payout };
+  });
+  const paidBonus = Math.min(spin.bonusPayout, capRemaining);
+  capRemaining -= paidBonus;
+  const candidatePayout = spin.payout;
+  const capped = candidatePayout >= capRemainingBefore;
+  return {
+    ...spin,
+    lineWins: cappedLineWins,
+    bonusPayout: paidBonus,
+    candidatePayout,
+    payout: capRemainingBefore - capRemaining,
+    capped,
+    capRemainingBefore,
+    capRemainingAfter: capRemaining,
+  };
+}
+
+function settleModeSpin(stops: Stops, bet: number, strips: ReelStrips, capRemainingBefore: number): ModeSpinOutcome {
+  const board = boardFromStops(strips, stops);
+  const bonusWins = evaluateBonusPlates(board, bet);
+  const candidatePayout = bonusPayout(bonusWins);
+  const payout = Math.min(candidatePayout, capRemainingBefore);
+  return {
+    stops: [...stops] as Stops,
+    board,
+    bonusWins,
+    candidatePayout,
+    payout,
+    capped: candidatePayout >= capRemainingBefore,
+    capRemainingBefore,
+    capRemainingAfter: capRemainingBefore - payout,
+  };
+}
+
+/** 仅按记录中的固定触发抽样判断是否进入玉兔模式。 */
+export function isModeTriggered(triggerRoll: number): boolean {
+  if (!Number.isFinite(triggerRoll) || triggerRoll < 0 || triggerRoll >= 1) throw new Error('触发抽样必须在 [0, 1) 内');
+  return triggerRoll < MODE_TRIGGER_PROBABILITY;
+}
+
+/** 结算一次付费旋转及其可能触发的完整玉兔模式。 */
+export function settleRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_STRIPS, modeStrips: ReelStrips = TEMPORARY_MODE_STRIPS, payTable: PayTable = PAYTABLE): RoundOutcome {
+  validateReplayInput(input);
+  assertStrips(strips);
+  assertModeStrips(modeStrips);
+
+  const cap = MAX_WIN_MULTIPLIER * input.bet;
+  if (input.capRemainingBefore > cap) throw new Error('封顶余额不能超过本轮封顶值');
+
+  const paidSpin = capSpin(settleSpin(input.paidStops, input.bet, strips, payTable), input.capRemainingBefore);
+  const triggered = isModeTriggered(input.triggerRoll);
+  const modeCanStart = triggered && !paidSpin.capped;
+  if (modeCanStart && input.modeStops.length !== MODE_SPINS) throw new Error('已触发玉兔模式时必须记录八组停点');
+  if (!modeCanStart && input.modeStops.length !== 0) throw new Error('未开始玉兔模式时不能带模式停点');
+
+  const modeSpins: ModeSpinOutcome[] = [];
+  let capRemaining = paidSpin.capRemainingAfter;
+  if (modeCanStart) {
+    for (const stops of input.modeStops) {
+      const modeSpin = settleModeSpin(stops, input.bet, modeStrips, capRemaining);
+      modeSpins.push(modeSpin);
+      capRemaining = modeSpin.capRemainingAfter;
+      if (modeSpin.capped) break;
+    }
+  }
+
+  const totalWin = input.capRemainingBefore - capRemaining;
+  return {
+    replayInput: cloneReplayInput(input),
+    paidSpin,
+    modeSpins,
+    triggered,
+    totalWin,
+    cap,
+    capped: capRemaining === 0,
+    remainingModeSpins: modeCanStart ? MODE_SPINS - modeSpins.length : 0,
+  };
+}
+
+/** 回放不再抽随机数，只使用记录的版本、停点和触发抽样。 */
+export function replayRound(input: ReplayInput, strips: ReelStrips = TEMPORARY_STRIPS, modeStrips: ReelStrips = TEMPORARY_MODE_STRIPS, payTable: PayTable = PAYTABLE): RoundOutcome {
+  return settleRound(input, strips, modeStrips, payTable);
+}
+
+/** 与麻将引擎相同的命名习惯：一条回放记录代表完整的一轮。 */
+export const replaySpin = replayRound;
