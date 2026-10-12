@@ -145,7 +145,9 @@ export default function JadeRabbitApp() {
   const busyRef = useRef(false);
   const stopRequested = useRef(false);
   const autoRef = useRef(0);
-  const spinRef = useRef<() => void>(() => {});
+  const spinRef = useRef<(automatic?: boolean) => void>(() => {});
+  const spaceRepeatRef = useRef<number | null>(null);
+  const spaceHeldRef = useRef(false);
   const bets = session?.allowedBets ?? [];
   const inMode = Boolean(freeSpins && freeSpins.remaining > 0);
   const spinning = spinningReels.some(Boolean);
@@ -231,7 +233,7 @@ export default function JadeRabbitApp() {
       busyRef.current = false; setBusy(false);
     }
   }
-  spinRef.current = () => { void spin(); };
+  spinRef.current = (automatic = false) => { void spin(automatic); };
 
   useEffect(() => {
     if (busy || rules || error || !session || !freeSpins?.remaining) return;
@@ -242,16 +244,40 @@ export default function JadeRabbitApp() {
   useEffect(() => {
     if (busy || rules || error || !session || inMode || autoRef.current <= 0 || autoRemaining === 0) return;
     if (credits < bet) { autoRef.current = 0; setAutoRemaining(null); setMessage('余额不足，自动旋转已停止'); return; }
-    const timer = window.setTimeout(() => { void spinRef.current(); }, win > 0 ? 1000 : 420);
+    const timer = window.setTimeout(() => { void spinRef.current(true); }, win > 0 ? 1000 : 420);
     return () => window.clearTimeout(timer);
   }, [busy, rules, error, session, inMode, autoRemaining, credits, bet, win, board]);
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || event.repeat || (event.target as HTMLElement).closest('input, select, textarea, button')) return;
-      event.preventDefault(); spinRef.current();
+    const clearSpaceRepeat = () => {
+      spaceHeldRef.current = false;
+      if (spaceRepeatRef.current !== null) {
+        window.clearInterval(spaceRepeatRef.current);
+        spaceRepeatRef.current = null;
+      }
     };
-    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || (event.target as HTMLElement).closest('input, select, textarea, button')) return;
+      event.preventDefault();
+      if (spaceHeldRef.current) return;
+      spaceHeldRef.current = true;
+      spinRef.current();
+      spaceRepeatRef.current = window.setInterval(() => {
+        if (!busyRef.current && spaceHeldRef.current) spinRef.current();
+      }, 760);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') clearSpaceRepeat();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearSpaceRepeat);
+    return () => {
+      clearSpaceRepeat();
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clearSpaceRepeat);
+    };
   }, []);
 
   const linePath = activeLine ? PAYLINES[activeLine - 1].map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / 4) * 100}`).join(' ') : '';
