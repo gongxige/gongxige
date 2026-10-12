@@ -3,10 +3,10 @@
 export const BOARD_HEIGHTS = [3, 4, 3] as const;
 export const MODE_SPINS = 8;
 export const MAX_WIN_MULTIPLIER = 5_000;
-export const MODE_TRIGGER_PROBABILITY = 0.0125;
+export const MODE_TRIGGER_PROBABILITY = 0.00745;
 export const ENGINE_VERSION = 'jade-rabbit-engine-1.0.0';
-export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.0.0';
-export const STRIP_REVISION = 'jade-rabbit-strip-1.0.0';
+export const MATH_CONFIG_VERSION = 'jade-rabbit-math-1.1.0';
+export const STRIP_REVISION = 'jade-rabbit-strip-1.1.0';
 
 export type LineSymbolId =
   | 'YUANBAO'
@@ -63,36 +63,77 @@ function token(symbolId: SymbolId, stackGroupId: string, bonusTier?: BonusTier):
   return bonusTier === undefined ? { symbolId, stackGroupId } : { symbolId, stackGroupId, bonusTier };
 }
 
-/**
- * 可替换的临时轴带。重复 stackGroupId 的连续格表示一个叠放段。
- * 这些轴带只用于 STEP-37 的可重复引擎和测试，STEP-39 再做数学调校。
- */
-export const TEMPORARY_STRIPS: ReelStrips = [
-  [
-    token('YUANBAO', 'L-Y-0'), token('YUANBAO', 'L-Y-0'), token('YUANBAO', 'L-Y-0'),
-    token('WILD', 'L-W-0'), token('WILD', 'L-W-0'),
-    token('CARROT', 'L-C-0'), token('FU_BAG', 'L-F-0'), token('COPPER_COIN', 'L-CU-0'),
-    token('BONUS_PLATE', 'L-B-0', 0), token('BONUS_PLATE', 'L-B-1', 1),
-  ],
-  [
-    token('FU_BAG', 'M-F-0'), token('FU_BAG', 'M-F-0'),
-    token('RED_ENVELOPE', 'M-R-0'), token('RED_ENVELOPE', 'M-R-0'),
-    token('WILD', 'M-W-0'), token('WILD', 'M-W-0'), token('FIRECRACKER', 'M-FI-0'),
-    token('CARROT', 'M-C-0'), token('YUANBAO', 'M-Y-0'), token('BONUS_PLATE', 'M-B-0', 2),
-  ],
-  [
-    token('CARROT', 'R-C-0'), token('CARROT', 'R-C-0'), token('CARROT', 'R-C-0'),
-    token('YUANBAO', 'R-Y-0'), token('FU_BAG', 'R-F-0'), token('COPPER_COIN', 'R-CU-0'),
-    token('RED_ENVELOPE', 'R-R-0'), token('WILD', 'R-W-0'), token('BONUS_PLATE', 'R-B-0', 3),
-  ],
+/** STEP-39 数学调校后的奖金档位分布。每条模式轴带每两格出现一枚牌匾。 */
+const MODE_TIER_SEQUENCE: readonly BonusTier[] = [
+  ...Array<BonusTier>(10).fill(0),
+  ...Array<BonusTier>(20).fill(1),
+  ...Array<BonusTier>(12).fill(2),
+  ...Array<BonusTier>(6).fill(3),
+  ...Array<BonusTier>(2).fill(4),
 ];
 
-/** 玉兔模式专用轴带；除奖金牌匾和空白格外不允许出现其他符号。 */
-export const TEMPORARY_MODE_STRIPS: ReelStrips = [
-  [token('BONUS_PLATE', 'ML-0', 0), token('BLANK', 'ML-1'), token('BLANK', 'ML-2'), token('BONUS_PLATE', 'ML-3', 1), token('BLANK', 'ML-4')],
-  [token('BLANK', 'MM-0'), token('BONUS_PLATE', 'MM-1', 2), token('BONUS_PLATE', 'MM-2', 3), token('BLANK', 'MM-3'), token('BONUS_PLATE', 'MM-4', 4), token('BLANK', 'MM-5')],
-  [token('BLANK', 'MR-0'), token('BONUS_PLATE', 'MR-1', 0), token('BLANK', 'MR-2'), token('BONUS_PLATE', 'MR-3', 1), token('BLANK', 'MR-4')],
+/** 主游戏只放 12 枚牌匾，档位在轴带上冻结，不在结算时临时抽样。 */
+const MAIN_BONUS_TIERS: readonly BonusTier[] = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2];
+
+function deterministicShuffle<T>(items: readonly T[], seed: number): T[] {
+  const result = [...items];
+  let state = seed >>> 0;
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    const swapIndex = state % (index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
+
+function mathMainStrip(prefix: string, seed: number): Strip {
+  const entries: Token[] = [];
+  const add = (symbolId: LineSymbolId | 'WILD', count: number): void => {
+    for (let index = 0; index < count; index += 1) entries.push(token(symbolId, `${prefix}-${symbolId}-${index}`));
+  };
+
+  add('YUANBAO', 3);
+  add('FU_BAG', 6);
+  add('RED_ENVELOPE', 10);
+  add('COPPER_COIN', 25);
+  add('FIRECRACKER', 25);
+  add('CARROT', 15);
+  add('WILD', 4);
+  MAIN_BONUS_TIERS.forEach((tier, index) => entries.push(token('BONUS_PLATE', `${prefix}-BONUS-${index}`, tier)));
+
+  const shuffled = deterministicShuffle(entries, seed);
+  return shuffled.map((entry, index) => {
+    const previous = shuffled[index - 1];
+    const sameRun = previous && previous.symbolId === entry.symbolId;
+    return sameRun ? { ...entry, stackGroupId: previous.stackGroupId } : entry;
+  });
+}
+
+function mathModeStrip(prefix: string, phase: number): Strip {
+  return Array.from({ length: 100 }, (_, index) => {
+    if ((index + phase) % 2 === 1) return token('BLANK', `${prefix}-blank-${index}`);
+    const tier = MODE_TIER_SEQUENCE[((index + phase) >> 1) % MODE_TIER_SEQUENCE.length];
+    return token('BONUS_PLATE', `${prefix}-bonus-${index}`, tier);
+  });
+}
+
+/** STEP-39 正式数学轴带：每条主轴 100 格，12 格奖金牌匾；其余 88 格为线奖符号。 */
+export const MATH_STRIPS: ReelStrips = [
+  mathMainStrip('L', 0x39102026),
+  mathMainStrip('M', 0x39102027),
+  mathMainStrip('R', 0x39102028),
 ];
+
+/** 玉兔模式轴带固定为 100 格、50 格牌匾和 50 格空白，窗口平均包含 5 枚牌匾。 */
+export const MATH_MODE_STRIPS: ReelStrips = [
+  mathModeStrip('ML', 0),
+  mathModeStrip('MM', 1),
+  mathModeStrip('MR', 0),
+];
+
+/** 保留旧导出名，服务器尚未接入玉兔时也能继续使用同一默认配置。 */
+export const TEMPORARY_STRIPS = MATH_STRIPS;
+export const TEMPORARY_MODE_STRIPS = MATH_MODE_STRIPS;
 
 export interface LineWin {
   readonly lineNumber: number;

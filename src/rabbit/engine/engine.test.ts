@@ -43,9 +43,9 @@ describe('玉兔送财 STEP-37 盘面和线奖', () => {
   });
 
   it('临时轴带用连续 stackGroupId 表示叠放，且不会改变逐格盘面', () => {
-    assert.equal(TEMPORARY_STRIPS[0][0].stackGroupId, TEMPORARY_STRIPS[0][1].stackGroupId);
-    assert.equal(TEMPORARY_STRIPS[1][0].stackGroupId, TEMPORARY_STRIPS[1][1].stackGroupId);
-    const result = boardFromStops(TEMPORARY_STRIPS, [0, 0, 0]);
+    assert.ok(TEMPORARY_STRIPS.every((strip) => strip.some((entry, index) => index > 0 && entry.stackGroupId === strip[index - 1].stackGroupId)));
+    const stackedIndex = TEMPORARY_STRIPS[0].findIndex((entry, index) => index > 0 && entry.stackGroupId === TEMPORARY_STRIPS[0][index - 1].stackGroupId);
+    const result = boardFromStops(TEMPORARY_STRIPS, [stackedIndex - 1, 0, 0]);
     assert.equal(result[0][0].stackGroupId, result[0][1].stackGroupId);
     assert.notEqual(result[0][0], TEMPORARY_STRIPS[0][0], '取盘面不会复用可变对象');
   });
@@ -197,6 +197,21 @@ describe('玉兔送财 STEP-38 奖金牌匾、玉兔模式、封顶和回放', (
     assert.equal(outcome.modeSpins.length, 1);
     assert.equal(outcome.modeSpins[0].payout, 100 * MAX_WIN_MULTIPLIER - outcome.paidSpin.payout);
     assert.equal(outcome.remainingModeSpins, MODE_SPINS - 1);
+  });
+
+  it('正式数学配置的付费回合和玉兔模式都不超过 5,000 倍封顶', () => {
+    let state = 0x39102026;
+    const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state; };
+    for (let index = 0; index < 2_000; index += 1) {
+      const triggered = index % 101 === 0;
+      const outcome = settleRound(replayBase({
+        parentRoundId: `math-cap-${index}`,
+        triggerRoll: triggered ? 0 : 0.5,
+        paidStops: [next() % 100, next() % 100, next() % 100],
+        modeStops: triggered ? Array.from({ length: MODE_SPINS }, () => [next() % 100, next() % 100, next() % 100] as const) : [],
+      }));
+      assert.ok(outcome.totalWin <= 100 * MAX_WIN_MULTIPLIER);
+    }
   });
 
   it('只凭回放记录重现整轮，随机 2,000 局逐项完全一致', () => {

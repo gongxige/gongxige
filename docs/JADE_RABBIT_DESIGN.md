@@ -153,8 +153,8 @@ L = B / 10
 {
   gameId: 'jade-rabbit',
   engineVersion: 'jade-rabbit-engine-1.0.0',
-  mathConfigVersion: 'jade-rabbit-math-1.0.0',
-  stripRevision: 'jade-rabbit-strip-1.0.0',
+  mathConfigVersion: 'jade-rabbit-math-1.1.0',
+  stripRevision: 'jade-rabbit-strip-1.1.0',
   bet: 100,
   parentRoundId: string,
   mode: 'paid',
@@ -178,7 +178,7 @@ L = B / 10
 
 ### 6.1 随机触发
 
-触发概率为每次**付费主游戏旋转**独立抽一次的 **1.25%**，这是**自定**初始值，STEP-39 可通过版本化配置调校。任何付费旋转都可能触发，不要求先出现奖金牌匾，不要求线中奖；玉兔模式中的 8 次旋转不会再次触发模式。
+触发概率为每次**付费主游戏旋转**独立抽一次的 **1.25%**，这是**自定**设计起点；STEP-39 的正式数学版本将其调校为 **0.7450%**。任何付费旋转都可能触发，不要求先出现奖金牌匾，不要求线中奖；玉兔模式中的 8 次旋转不会再次触发模式。
 
 触发抽样在主旋转停点确定后结算，动画只展示服务器已经返回的 `triggered` 结果。若主旋转结算后已经达到封顶，则不创建模式；否则在主旋转所有奖项结算完成后创建恰好 8 次的模式状态。
 
@@ -262,7 +262,7 @@ totalWin += payable
 {
   gameId: 'jade-rabbit',
   engineVersion: 'jade-rabbit-engine-1.0.0',
-  mathConfigVersion: 'jade-rabbit-math-1.0.0',
+  mathConfigVersion: 'jade-rabbit-math-1.1.0',
   launchPath: '/jade-rabbit',
   spin(input): outcome,
   replay(input): outcome
