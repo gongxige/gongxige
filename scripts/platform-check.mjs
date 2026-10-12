@@ -23,7 +23,7 @@ const API = `http://127.0.0.1:${API_PORT}`;
 const ADMIN_PASSWORD = randomBytes(12).toString('base64url');
 const SECRET = 'local-demo-secret';
 const dataDir = mkdtempSync(join(tmpdir(), 'platform-check-'));
-const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: dataDir, OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, OPERATOR_SECRET: SECRET, STATE_FILE: 'game-server-state.json' };
+const env = { ...process.env, ADMIN_PASSWORD, DATA_DIR: dataDir, OPERATOR_PORT: String(OP_PORT), API_PORT: String(API_PORT), OPERATOR_URL: OP, PROVIDER_URL: API, OPERATOR_SECRET: SECRET, STATE_FILE: 'game-server-state.json', RABBIT_TRIGGER_ROLL: '0' };
 const children = [spawn(process.execPath, ['platform-server.mjs'], { env, stdio: 'ignore' }), spawn(process.execPath, ['server.mjs'], { env, stdio: 'ignore' })];
 process.on('exit', () => { children.forEach((c) => c.kill()); try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* still in use on Windows */ } });
 
@@ -142,14 +142,19 @@ assert.equal(report.ok, true);
 step(`同时 20 次下注不会扣成负数：余额 ${target} 时 20 笔 ${BET} 只成功 ${accepted} 笔，剩 ${afterRace.balance}；同时 20 次转动后余额仍 ≥ 0，对账一致`);
 
 // 9. Mahjong Cascade end to end: new player → deposit → approved → 50+ rounds including a free-spin
-//    feature → withdrawal → approved → reconciled. The registered 10,000 demo credits are enough for
-//    at least 50 paid rounds at the V2 minimum bet; no special Mahjong deposit is required.
+//    feature → withdrawal → approved → reconciled. Add a small approved demo
+//    deposit so a low-return random sample cannot make this check flaky.
 const mjName = `e2e-mj-${randomBytes(3).toString('hex')}`;
 assert.equal((await post(`${OP}/auth/register`, { username: mjName, password: 'e2e-player-pass-1' })).status, 201);
 const mj = (await post(`${OP}/auth/login`, { username: mjName, password: 'e2e-player-pass-1' })).cookie;
 const mjWallet = async () => (await call(`${OP}/api/wallet`, { cookie: mj })).body;
 let mjCredits = (await mjWallet()).balance;
 assert.equal(mjCredits, 10_000);
+const mjDeposit = (await post(`${OP}/api/deposit-requests`, { amount: 5_000 }, mj)).body.request;
+assert.equal(mjDeposit.status, 'pending');
+assert.equal((await adminPost(`/deposit-requests/${mjDeposit.id}/approve`)).status, 200);
+mjCredits = (await mjWallet()).balance;
+assert.equal(mjCredits, 15_000);
 const mjLaunch = await post(`${OP}/games/mahjong-cascade/launch`, {}, mj);
 assert.equal(mjLaunch.status, 200);
 const mjToken = new URL(mjLaunch.body.gameUrl).searchParams.get('token');
@@ -171,7 +176,7 @@ while ((mjPaid < ROUNDS || mjFree === 0 || mjSession.freeSpins) && mjPaid < 1500
 assert.ok(mjPaid >= ROUNDS, `mahjong paid rounds ${mjPaid}`);
 assert.ok(mjFree > 0, `free spins were played within ${mjPaid} paid rounds`);
 assert.equal((await mjWallet()).balance, mjCredits);
-assert.equal(mjCredits, 10_000 - mjStaked + mjWon);
+assert.equal(mjCredits, 15_000 - mjStaked + mjWon);
 const mjRecords = (await call(`${OP}/api/game-records`, { cookie: mj })).body.records;
 assert.ok(mjRecords.length > 0 && mjRecords.every((r) => r.gameId === 'mahjong-cascade'), 'player sees only own mahjong rounds');
 step(`麻将连连胡：使用注册送的 10,000 积分玩 ${mjRounds} 局（付费 ${mjPaid}、免费 ${mjFree}，共 ${mjCascades} 段消除连锁）：下注 ${mjStaked}、赢分 ${mjWon}，每局余额 = −投注 + 赢分，平台余额 ${mjCredits} 一致`);
@@ -184,5 +189,67 @@ assert.deepEqual([mjReport.ok, mjReport.balance, mjReport.ledgerBalance], [true,
 assert.ok((await reconciled()).every((r) => r.ok));
 step(`麻将连连胡：提现 1,000 → 后台通过 → 对账一致（钱包 ${mjCredits} = 流水之和），所有玩家对账一致`);
 
+// 10. Jade Rabbit end to end: register, approve a deposit, play 50 paid
+// parent rounds plus every triggered eight-spin mode, then withdraw and reconcile.
+const rabbitName = `e2e-rabbit-${randomBytes(3).toString('hex')}`;
+assert.equal((await post(`${OP}/auth/register`, { username: rabbitName, password: 'e2e-player-pass-1' })).status, 201);
+const rabbit = (await post(`${OP}/auth/login`, { username: rabbitName, password: 'e2e-player-pass-1' })).cookie;
+assert.ok(rabbit);
+const rabbitWallet = async () => (await call(`${OP}/api/wallet`, { cookie: rabbit })).body;
+const rabbitDeposit = (await post(`${OP}/api/deposit-requests`, { amount: 5_000 }, rabbit)).body.request;
+assert.equal(rabbitDeposit.status, 'pending');
+assert.equal((await adminPost(`/deposit-requests/${rabbitDeposit.id}/approve`)).status, 200);
+assert.equal((await rabbitWallet()).balance, 15_000);
+
+const rabbitLaunch = await post(`${OP}/games/jade-rabbit/launch`, {}, rabbit);
+assert.equal(rabbitLaunch.status, 200);
+const rabbitToken = new URL(rabbitLaunch.body.gameUrl).searchParams.get('token');
+assert.ok(rabbitToken);
+const rabbitSpin = () => post(`${API}/api/spin`, { token: rabbitToken, bet: 100 });
+let rabbitCredits = (await call(`${API}/api/session?token=${rabbitToken}`)).body.credits;
+let rabbitPaid = 0;
+let rabbitFree = 0;
+let rabbitStaked = 0;
+let rabbitWon = 0;
+let rabbitModeRemaining = 0;
+while (rabbitPaid < ROUNDS || rabbitModeRemaining > 0) {
+  const { status, body } = await rabbitSpin();
+  assert.equal(status, 200, body.error);
+  assert.equal(body.gameId, 'jade-rabbit');
+  const paid = body.mode === 'paid';
+  if (paid) {
+    rabbitPaid += 1;
+    rabbitStaked += body.bet;
+    if (rabbitPaid === 1) {
+      assert.equal(body.triggered, true, 'fixed test trigger must enter Jade Rabbit mode');
+      assert.equal(body.freeSpinsAwarded, 8);
+    }
+    rabbitModeRemaining = body.freeSpins?.remaining ?? 0;
+  } else {
+    rabbitFree += 1;
+    rabbitModeRemaining = body.freeSpins?.remaining ?? 0;
+  }
+  rabbitWon += body.payout;
+  assert.equal(body.credits, rabbitCredits - (paid ? body.bet : 0) + body.payout, `rabbit round ${body.roundId}`);
+  rabbitCredits = body.credits;
+}
+assert.equal(rabbitPaid, ROUNDS);
+assert.ok(rabbitFree >= 8, 'Jade Rabbit mode rounds were played');
+assert.equal((await rabbitWallet()).balance, rabbitCredits);
+assert.equal(rabbitCredits, 15_000 - rabbitStaked + rabbitWon);
+const rabbitRecords = (await call(`${OP}/api/game-records`, { cookie: rabbit })).body.records;
+assert.ok(rabbitRecords.length > 0, 'player has Jade Rabbit records');
+assert.ok(rabbitRecords.every((r) => r.gameId === 'jade-rabbit'));
+step(`Jade Rabbit: ${rabbitPaid} paid rounds + ${rabbitFree} mode rounds, staked ${rabbitStaked}, won ${rabbitWon}, balance ${rabbitCredits}`);
+
+const rabbitWithdrawal = (await post(`${OP}/api/withdrawal-requests`, { amount: 1_000 }, rabbit)).body.request;
+assert.equal((await adminPost(`/withdrawal-requests/${rabbitWithdrawal.id}/approve`)).status, 200);
+rabbitCredits -= 1_000;
+assert.deepEqual([(await rabbitWallet()).balance, (await rabbitWallet()).frozen_balance], [rabbitCredits, 0]);
+const rabbitReport = (await reconciled()).find((r) => r.username === rabbitName);
+assert.deepEqual([rabbitReport.ok, rabbitReport.balance, rabbitReport.ledgerBalance], [true, rabbitCredits, rabbitCredits]);
+assert.ok((await reconciled()).every((r) => r.ok));
+step(`Jade Rabbit withdrawal approved and reconciled: balance ${rabbitCredits}`);
 console.log('\n全部通过。');
+
 process.exit(0);

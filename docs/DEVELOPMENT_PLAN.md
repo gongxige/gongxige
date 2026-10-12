@@ -167,7 +167,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] STEP-33 数学第 2 版调校（第 1 次尝试，2026-10-12）
 - [x] STEP-34 小额投注上线（第 1 次尝试，2026-10-12）
 
-### 阶段 11：第三款游戏「玉兔送财」 ⏳ 自动开发中
+### 阶段 11：第三款游戏「玉兔送财」 ✅ 已完成
 
 需求见 [JADE_RABBIT_TASK.md](JADE_RABBIT_TASK.md)（根据用户提供的参考录屏整理）。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-36 ~ STEP-44 由 `npm run autopilot` 自动开发，进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
@@ -179,7 +179,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 - [x] STEP-41 画面：布局、符号、吉祥物、转动（2026-10-12，第 2 次尝试：修正 3-4-3 中奖线纵坐标）
 - [x] STEP-42 中奖表现和玉兔模式画面（2026-10-12，第 3 次尝试，修复 mode-trigger → mode-intro → mode-spin 定时器清理回归）
 - [x] STEP-43 接入平台（第 1 次尝试，2026-10-12）
-- [ ] STEP-44 端到端检查和收尾
+- [x] STEP-44 端到端检查和收尾：`check:platform` 覆盖玉兔送财注册、充值审核、50 个付费父局及玉兔模式、提现审核和对账；README 增加玉兔送财说明；`rtp:rabbit` 与 `JADE_RABBIT_MATH.md` 一致（2026-10-12，第 1 次尝试）
 
 ## 四、重要决定记录
 

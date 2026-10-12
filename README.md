@@ -7,12 +7,20 @@
 - 开发计划与进度：[docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)
 - 开发日志：[docs/DEVLOG.md](docs/DEVLOG.md)
 
-## 两款游戏
+## 三款游戏
 
 - **Wild Frontier**：5 × 4、1024 Ways 的非洲草原老虎机，理论 RTP 96.41%（`npm run rtp`）。规则在 `src/engine/`。
 - **麻将连连胡**（Mahjong Cascade）：5 列 4-5-5-5-4 格、2,000 种赢法的麻将消除老虎机。中奖的牌消除、上方落下补牌可以连锁，同一次旋转第 1~4 次中奖 ×1/×2/×3/×5（免费旋转 ×2/×4/×6/×10）；中间三列的金色牌中奖后变百搭；3 个以上"胡"送 10 次免费旋转（每多 1 个 +2 次）；最高赢分 1,708 倍。RTP 96.95%（1,000 万局模拟，`npm run rtp:mahjong`，详见 [docs/MAHJONG_MATH.md](docs/MAHJONG_MATH.md)）。规则在 `src/mahjong/engine/`，设计见 [docs/MAHJONG_DESIGN.md](docs/MAHJONG_DESIGN.md)。牌面、界面全部用 SVG / CSS 自己画，只借鉴玩法，不使用任何参考游戏的名字、图片或代码。目前投注固定为 10,000 积分一局。
 
-两款游戏都从玩家网站的大厅进入，走同一套钱包；后台的游戏记录、回放和概览会区分两款游戏。
+三款游戏都从玩家网站的大厅进入，走同一套钱包；后台的游戏记录、回放和概览会区分三款游戏。
+
+### 玉兔送财（Jade Rabbit）
+
+第三款原创演示游戏为 3-4-3 盘面的「玉兔送财」：普通付费旋转可按固定数学配置触发 8 次玉兔模式旋转，奖金牌匾按服务器结果结算，单个付费回合最高 5,000 倍投注。它与另外两款游戏共用平台虚拟积分钱包；玉兔模式的 8 次子旋转不重复扣款，所有局面都保存可回放数据。数学版本为 `jade-rabbit-math-1.1.0`，RTP 报告使用：
+
+```bash
+npm run rtp:rabbit
+```
 
 ## 运行
 
