@@ -11,3 +11,6 @@ reference/
 
 # 自动开发脚本的临时文件和日志
 .autopilot/
+
+# 本机专用素材（来自参考游戏，只在本机用，不进 Git、不公开）
+public/local-assets/
