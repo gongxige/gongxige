@@ -43,6 +43,21 @@ async function playMahjong(cookie: string) {
   assert.equal(spin.mathConfigVersion, 'mahjong-math-2.0.0');
   return spin as Json;
 }
+async function playRabbit(cookie: string) {
+  const launch = await post('/games/jade-rabbit/launch', {}, cookie);
+  assert.equal(launch.status, 200, JSON.stringify(launch.body));
+  assert.equal(launch.body.gameId, 'jade-rabbit');
+  const gameUrl = new URL(launch.body.gameUrl);
+  assert.equal(gameUrl.pathname, '/jade-rabbit');
+  const token = gameUrl.searchParams.get('token');
+  const session = await (await fetch(`${apiBase}/api/session?token=${token}`)).json();
+  assert.equal(session.gameId, 'jade-rabbit');
+  assert.deepEqual(session.allowedBets, [100, 200, 500, 1_000, 2_000]);
+  const spin = await (await fetch(`${apiBase}/api/spin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, bet: session.allowedBets[0] }) })).json();
+  assert.ok(spin.roundId, JSON.stringify(spin));
+  assert.equal(spin.gameId, 'jade-rabbit');
+  return spin as Json;
+}
 
 let admin = '';
 before(async () => {
@@ -96,9 +111,45 @@ describe('平台接入麻将连连胡', () => {
     assert.equal(replay.status, 200);
     const overview = (await request('/api/admin/overview', {}, admin)).body;
     const titles = (overview.games as Json[]).map((g) => g.title);
-    assert.deepEqual(titles, ['Wild Frontier', '麻将连连胡']);
+    assert.deepEqual(titles, ['Wild Frontier', '麻将连连胡', '玉兔送财']);
     const mj = (overview.games as Json[]).find((g) => g.title === '麻将连连胡')!;
     assert.ok(mj.rounds >= 2, `mahjong rounds today ${mj.rounds}`);
+    assert.equal(overview.gamesAvailable, true);
+  });
+});
+
+describe('平台接入玉兔送财', () => {
+  it('玩家只能看到自己的玉兔送财记录，别人的局号查不到也打不开回放', async () => {
+    const alice = await newPlayer('rabbit-alice');
+    const bob = await newPlayer('rabbit-bob');
+    const spin = await playRabbit(alice);
+    const aliceRecords = (await request('/api/game-records', {}, alice)).body.records as Json[];
+    const mine = aliceRecords.find((r) => r.roundId === spin.roundId);
+    assert.ok(mine, 'alice sees her rabbit round');
+    assert.equal(mine!.gameId, 'jade-rabbit');
+    const bobRecords = (await request('/api/game-records', {}, bob)).body.records as Json[];
+    assert.equal(bobRecords.some((r) => r.roundId === spin.roundId), false, 'bob does not see alice\'s rabbit round');
+    assert.equal((await request(`/api/game-records/${spin.roundId}/replay`, {}, bob)).status, 404);
+    const replay = await request(`/api/game-records/${spin.roundId}/replay`, {}, alice);
+    assert.equal(replay.status, 200);
+    assert.match(replay.body.text, /玉兔送财/);
+  });
+
+  it('后台的游戏记录和概览区分三款游戏，点局号能回放玉兔送财', async () => {
+    const carol = await newPlayer('rabbit-carol');
+    const spin = await playRabbit(carol);
+    const rounds = (await request('/api/admin/rounds', {}, admin)).body.rounds as Json[];
+    const row = rounds.find((r) => r.roundId === spin.roundId);
+    assert.equal(row?.gameId, 'jade-rabbit');
+    assert.equal(row?.username, 'rabbit-carol');
+    const replay = await request(`/api/admin/rounds/${spin.roundId}/replay`, {}, admin);
+    assert.equal(replay.status, 200);
+    assert.match(replay.body.text, /玉兔送财/);
+    const overview = (await request('/api/admin/overview', {}, admin)).body;
+    const titles = (overview.games as Json[]).map((g) => g.title);
+    assert.deepEqual(titles, ['Wild Frontier', '麻将连连胡', '玉兔送财']);
+    const rabbit = (overview.games as Json[]).find((g) => g.title === '玉兔送财')!;
+    assert.ok(rabbit.rounds >= 2, `rabbit rounds today ${rabbit.rounds}`);
     assert.equal(overview.gamesAvailable, true);
   });
 });

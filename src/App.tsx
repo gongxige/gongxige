@@ -8,10 +8,11 @@ type Player = { id: string; username: string; status: string };
 type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
 type WalletRecord = { kind: string; amount: number; status: string; createdAt: string };
 type GameRecord = { roundId: string; gameId?: string; at: string; bet: number; payout: number };
-const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
+const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡', 'jade-rabbit': '玉兔送财' };
 const LOBBY_GAMES = [
   { gameId: 'wild-frontier', title: 'Wild Frontier', art: '♜', sub: '1024 Ways · 虚拟积分体验' },
   { gameId: 'mahjong-cascade', title: '麻将连连胡', art: '中', sub: '2000 Ways · 消除连锁 · 金色变百搭' },
+  { gameId: 'jade-rabbit', title: '玉兔送财', art: '玉', sub: '10 条线 · 奖金牌匾 · 财富旋转' },
 ];
 type View = 'login' | 'register' | 'lobby' | 'wallet' | 'game-records' | 'profile';
 

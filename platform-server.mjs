@@ -124,7 +124,7 @@ function state() {
 }
 
 /** Games in the lobby (the game server knows the same ids). */
-export const PLATFORM_GAMES = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
+export const PLATFORM_GAMES = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡', 'jade-rabbit': '玉兔送财' };
 
 async function createLaunch(playerId, gameId = 'wild-frontier') {
   const player = db.prepare('SELECT id, username FROM players WHERE id = ?').get(playerId);

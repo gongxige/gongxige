@@ -25,7 +25,7 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const fmt = (n: number) => n.toLocaleString('zh-CN');
-const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡' };
+const GAME_TITLES: Record<string, string> = { 'wild-frontier': 'Wild Frontier', 'mahjong-cascade': '麻将连连胡', 'jade-rabbit': '玉兔送财' };
 const time = (iso: string) => new Date(iso).toLocaleString('zh-CN');
 const kindLabel: Record<string, string> = { registration_credit: '注册赠送', deposit_approved: '充值到账', withdrawal_freeze: '提现冻结', withdrawal_approved: '提现完成', withdrawal_rejected: '提现被拒（解冻）', bet: '下注', win: '派彩', refund: '回滚', manual_adjustment: '后台调整' };
 const actionLabel: Record<string, string> = { login: '登录后台', logout: '退出后台', freeze_player: '冻结玩家', unfreeze_player: '解冻玩家', adjust_balance: '调整余额', approve_deposit: '通过充值', reject_deposit: '拒绝充值', approve_withdrawal: '通过提现', reject_withdrawal: '拒绝提现', set_fault: '故障模拟' };

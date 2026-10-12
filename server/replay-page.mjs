@@ -4,6 +4,7 @@
 
 import { ENGINE_VERSION, replaySpin } from '../src/engine/index.ts';
 import { mathConfigForVersion, replaySpin as replayMahjongSpin } from '../src/mahjong/engine/index.ts';
+import { replayRound as replayRabbitRound, BOARD_HEIGHTS as RABBIT_BOARD_HEIGHTS } from '../src/rabbit/engine/index.ts';
 import { escapeHtml } from './http.mjs';
 
 const NAMES = { bull: '水牛', lion: '狮子', elephant: '大象', zebra: '斑马', deer: '羚羊', coin: '金币', wild: '百搭' };
@@ -12,6 +13,7 @@ const fmt = (n) => Number(n).toLocaleString('zh-CN');
 
 export function replayPage(round, imageBase) {
   if (round?.gameId === 'mahjong-cascade') return mahjongReplayPage(round);
+  if (round?.gameId === 'jade-rabbit') return jadeRabbitReplayPage(round);
   if (!round) return page('找不到这一局', '<p class="lead">没有这个局号的开奖记录。如果平台流水里这一局只有"扣款 + 回滚"，说明扣款没有及时确认，这一局在开奖前就取消了。</p>');
 
   let check;
@@ -58,6 +60,22 @@ export function replayPage(round, imageBase) {
   return page(`回放 ${round.roundId}`, `${check}<div class="layout">${grid}<div><h2>中奖</h2>${wins}</div></div><h2>记录</h2><table>${rows}</table>`);
 }
 
+function jadeRabbitReplayPage(round) {
+  try {
+    const replayed = replayRabbitRound(round.replayInput);
+    const relatedPayout = replayed.paidSpin.payout + replayed.modeSpins.reduce((sum, spin) => sum + spin.payout, 0);
+    const segment = round.mode === 'free' ? replayed.modeSpins[round.modeIndex] : replayed.paidSpin;
+    const same = Boolean(segment) && segment.payout === round.payout && JSON.stringify(segment.stops) === JSON.stringify(round.stops)
+      && relatedPayout === replayed.totalWin && round.engineVersion === round.replayInput.engineVersion;
+    const board = (value) => `<div class="rabbit-board">${value.map((column, x) => `<div class="rabbit-column rows-${RABBIT_BOARD_HEIGHTS[x]}">${column.map((entry) => `<i>${escapeHtml(entry.symbolId)}${entry.bonusTier === undefined ? '' : ` · 档位 ${entry.bonusTier}`}</i>`).join('')}</div>`).join('')}</div>`;
+    const lineWins = (segment?.lineWins ?? []).map((win) => `<li>第 ${win.lineNumber} 条：${escapeHtml(win.symbolId)} × ${win.multiplier} = <b>${fmt(win.payout)}</b></li>`).join('') || '<li>本局没有线奖。</li>';
+    const bonusWins = (segment?.bonusWins ?? []).map((win) => `<li>奖金牌档位 ${win.tier} × ${win.multiplier} = <b>${fmt(win.value)}</b></li>`).join('') || '<li>本局没有奖金牌。</li>';
+    return page(`玉兔送财回放 ${round.roundId}`, `<p class="${same ? 'ok' : 'bad'}">${same ? '✓ 按记录停点、版本和玉兔模式结果重算，结果完全一致。' : '✗ 回放与记录不一致或规则版本不可用。'}</p><p>局号：${escapeHtml(round.roundId)} · ${round.mode === 'free' ? `财富旋转第 ${Number(round.modeIndex) + 1} 次` : '付费旋转'} · 投注 ${fmt(round.bet)} · 派彩 ${fmt(round.payout)}</p><h2>盘面</h2>${board(segment?.board ?? [])}<h2>线奖</h2><ul>${lineWins}</ul><h2>奖金牌</h2><ul>${bonusWins}</ul><p>本次完整玉兔模式总赢分：${fmt(replayed.totalWin)}；${replayed.triggered ? `共 ${replayed.modeSpins.length} 次财富旋转。` : '未触发财富旋转。'}</p>`);
+  } catch (error) {
+    return page('玉兔送财回放', `<p class="bad">✗ 记录无法重现：${escapeHtml(error.message)}</p>`);
+  }
+}
+
 function mahjongReplayPage(round) {
   try {
     const config = mathConfigForVersion(round.mathConfigVersion);
@@ -79,7 +97,7 @@ main{max-width:980px;margin:0 auto;padding:24px 16px 48px}h1{font-size:20px;marg
 .cell{position:relative;aspect-ratio:1;background:#f6ecd6;border-radius:6px;display:flex;align-items:center;justify-content:center;opacity:.45}
 .grid:not(:has(.win)) .cell,.cell.win{opacity:1}.cell.win{box-shadow:0 0 0 3px var(--gold),0 0 14px rgba(244,197,91,.7)}.cell img{width:92%;height:92%;object-fit:contain}
 .cell b{position:absolute;right:4px;bottom:4px;background:#c4001f;color:#fff;border-radius:6px;padding:0 5px;font-size:12px}
-table{border-collapse:collapse;width:100%;background:var(--panel);border-radius:10px;overflow:hidden}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;width:130px}
+table{border-collapse:collapse;width:100%;background:var(--panel);border-radius:10px;overflow:hidden}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;width:130px}.rabbit-board{display:flex;gap:8px;align-items:stretch;max-width:640px;padding:10px;background:#3b160d;border:3px solid var(--gold);border-radius:12px}.rabbit-column{display:grid;flex:1;gap:6px}.rabbit-column i{display:grid;place-items:center;min-height:58px;padding:5px;background:#f6ecd6;color:#4b2413;border-radius:7px;font-style:normal;font-weight:700;text-align:center}
 .ok{color:#7be3a2}.bad{color:#ff8a80;font-weight:600}.warn{color:#ffd27a}.lead{color:var(--muted)}ul{margin:0;padding-left:18px}
 </style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`;
 }
