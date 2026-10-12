@@ -417,4 +417,5 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 @keyframes rabbit-tail-open { from { transform: rotate(0) scale(.85); } to { transform: rotate(28deg) scale(1.15); } }
 /* 阶段 12：玉兔送财本机符号图（320×320 透明 PNG），缺图时仍显示上面的 SVG */
 .rabbit-symbol-image { display: block; object-fit: contain; user-select: none; -webkit-user-drag: none; pointer-events: none; }
-.rabbit-cell > .rabbit-symbol-image { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rabbit-reel-column > .rabbit-cell > .rabbit-symbol-image { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rabbit-rolling-track .rabbit-symbol-image { height: auto; aspect-ratio: 120 / 88; }
