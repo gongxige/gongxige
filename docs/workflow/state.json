@@ -48,7 +48,8 @@
     "STEP-46",
     "STEP-47",
     "STEP-48",
-    "STEP-49"
+    "STEP-49",
+    "STEP-50"
   ],
   "attempts": {
     "STEP-01": 5,
@@ -99,7 +100,8 @@
     "STEP-46": 2,
     "STEP-47": 1,
     "STEP-48": 2,
-    "STEP-49": 2
+    "STEP-49": 2,
+    "STEP-50": 1
   },
   "limits": {
     "STEP-01": 8
