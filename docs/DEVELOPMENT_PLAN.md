@@ -172,7 +172,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 需求见 [JADE_RABBIT_TASK.md](JADE_RABBIT_TASK.md)（根据用户提供的参考录屏整理）。按 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 的 STEP-36 ~ STEP-44 由 `npm run autopilot` 自动开发，进度见 [workflow/PROGRESS.md](workflow/PROGRESS.md)。
 
 - [x] STEP-36 设计文档（2026-10-12，第 1 次尝试）
-- [ ] STEP-37 引擎：盘面、10 条线、百搭、线奖
+- [x] STEP-37 引擎：盘面、10 条线、百搭、线奖（2026-10-12，第 1 次尝试）
 - [ ] STEP-38 引擎：奖金符号、玉兔模式、5,000 倍封顶、回放
 - [ ] STEP-39 数学调校：RTP 96.75%、中等波动
 - [ ] STEP-40 游戏服务器接入第三款游戏
