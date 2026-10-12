@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   BOARD_HEIGHTS,
   BONUS_MULTIPLIERS,
@@ -168,7 +168,8 @@ function rollingSegments(inMode: boolean): Token[][] {
   });
 }
 
-function RollingColumn({ rows, bet, segment, fast }: { rows: number; bet: number; segment: readonly Token[]; fast: boolean }) {
+/** 用 memo 包住：页面其它部分重渲染时（例如每列停下），没变的滚动带不跟着重渲染。 */
+const RollingColumn = memo(function RollingColumn({ rows, bet, segment, fast }: { rows: number; bet: number; segment: readonly Token[]; fast: boolean }) {
   const cells = useMemo(() => [...segment, ...segment], [segment]);
   // 滚动带高度 = 2 份 × 6 格，按列高的 rows 格换算；动画从 -50%（第二份顶端）匀速移到 0，正好一份，循环无缝。
   const style = {
@@ -176,7 +177,7 @@ function RollingColumn({ rows, bet, segment, fast }: { rows: number; bet: number
     animationDuration: `${segment.length / (fast ? ROLL_CELLS_PER_SECOND_FAST : ROLL_CELLS_PER_SECOND)}s`,
   } as CSSProperties;
   return <div className="rabbit-rolling-track" style={style}>{cells.map((entry, index) => <div className="rabbit-cell" key={index}><RabbitSymbol entry={entry} bet={bet} /></div>)}</div>;
-}
+});
 
 export default function JadeRabbitApp() {
   const [session, setSession] = useState<Session | null>(null);
