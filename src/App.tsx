@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import GameApp from './GameApp.tsx';
 import AdminApp from './admin/AdminApp.tsx';
 import MahjongApp from './mahjong/MahjongApp.tsx';
+import JadeRabbitApp from './rabbit/JadeRabbitApp.tsx';
 
 type Player = { id: string; username: string; status: string };
 type Wallet = { playerId: string; balance: number; frozen_balance?: number; currency: string };
@@ -74,6 +75,7 @@ function ProfilePage({ onBack }: { onBack: () => void }) {
 export default function App() {
   if (location.pathname === '/admin' || location.pathname.startsWith('/admin/')) return <AdminApp />;
   if (location.pathname === '/mahjong') return <MahjongApp />;
+  if (location.pathname === '/jade-rabbit') return <JadeRabbitApp />;
   return <PlayerApp />;
 }
 
