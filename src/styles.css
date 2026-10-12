@@ -502,3 +502,25 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-payline-grid { margin-bottom: 1.2cqw; }
 .rabbit-primary { margin-top: 1.2cqw; }
 @media (max-width: 520px) { .rabbit-paytable small { font-size: 2.2cqw; } }
+/* STEP-49：转动更流畅 */
+/* 滚动带放两份同样的符号，固定在列顶，从 -50% 匀速移到 0（正好一份），循环无缝；用 GPU 合成的位移，不触发重排 */
+.rabbit-rolling-track .rabbit-symbol { filter: none; }
+.rabbit-reel-column.is-spinning { contain: layout paint; }
+.rabbit-rolling-track { position: absolute; top: 0; left: 0; right: 0; gap: 0; will-change: transform; transform: translate3d(0, -50%, 0); backface-visibility: hidden; }
+.rabbit-reel-column.is-spinning .rabbit-rolling-track { animation-name: rabbit-roll-loop; animation-timing-function: linear; animation-iteration-count: infinite; }
+@keyframes rabbit-roll-loop { from { transform: translate3d(0, -50%, 0); } to { transform: translate3d(0, 0, 0); } }
+.rabbit-rolling-track .rabbit-cell { flex: none; width: 100%; height: calc(100% / 12); }
+.rabbit-rolling-track .rabbit-cell > .rabbit-symbol { position: absolute; inset: 4%; width: 92%; height: 92%; }
+.rabbit-rolling-track .rabbit-cell > img.rabbit-symbol, .rabbit-rolling-track .rabbit-cell > .rabbit-plate-image { inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+/* 停轴：从上方带一点速度落下，略过头再回弹到位 */
+.rabbit-reel-column.is-landing > .rabbit-cell { animation: rabbit-land .38s cubic-bezier(.22, 1.3, .36, 1) both; }
+.rabbit-reel-column.is-landing.is-fast > .rabbit-cell { animation-duration: .24s; }
+@keyframes rabbit-land { from { transform: translate3d(0, -26%, 0); } to { transform: translate3d(0, 0, 0); } }
+/* 期待蓝光：只改透明度，不再逐帧重画阴影 */
+.rabbit-reel-column.is-anticipating { animation: none; box-shadow: none; }
+.rabbit-reel-column.is-anticipating::before { content: ''; position: absolute; inset: 0; z-index: 6; pointer-events: none; border: .3cqw solid #7fe3ff; border-radius: inherit; box-shadow: inset 0 0 2.4cqw .6cqw #45cfff; animation: rabbit-blue-glow .52s ease-in-out infinite alternate; }
+@keyframes rabbit-blue-glow { from { opacity: .45; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .rabbit-reel-column.is-landing > .rabbit-cell, .rabbit-reel-column.is-anticipating::before { animation: none; } }
+/* 滚动带和停下的格子都一直在页面里：转动时显示滚动带、隐藏格子，停下时反过来；开始和停下都不再新建元素 */
+.rabbit-reel-column:not(.is-spinning) > .rabbit-rolling-track { visibility: hidden; animation: none; }
+.rabbit-reel-column.is-spinning > .rabbit-cell { visibility: hidden; }

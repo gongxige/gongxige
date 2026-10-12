@@ -153,15 +153,40 @@ function RulesModal({ bet, onClose }: { bet: number; onClose: () => void }) {
   </div>;
 }
 
-function RollingColumn({ height, bet, seed }: { height: number; bet: number; seed: readonly Token[] }) {
-  const rolling = useMemo(() => Array.from({ length: height + 5 }, (_, index) => seed[index % seed.length] ?? EMPTY_TOKEN), [height, seed]);
-  return <div className="rabbit-rolling-track">{rolling.map((entry, index) => <div className="rabbit-cell" key={`${entry.stackGroupId}-${index}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}</div>;
+/** 每列滚动带的符号数（一份）。滚动带放两份，循环正好移动一份的长度，接缝处看不出跳动。 */
+const ROLL_SEGMENT = 6;
+/** 滚动速度：每秒滚过的格数（极速时更快）。 */
+const ROLL_CELLS_PER_SECOND = 10;
+const ROLL_CELLS_PER_SECOND_FAST = 14;
+
+/** 转动开始时从真实轴带（玉兔模式用模式轴带）随机取一段，整局转动中不再改变，不会中途换图。 */
+function rollingSegments(inMode: boolean): Token[][] {
+  const strips = inMode ? MATH_MODE_STRIPS : MATH_STRIPS;
+  return strips.map((strip) => {
+    const start = Math.floor(Math.random() * strip.length);
+    return Array.from({ length: ROLL_SEGMENT }, (_, index) => strip[(start + index) % strip.length]);
+  });
+}
+
+function RollingColumn({ rows, bet, segment, fast }: { rows: number; bet: number; segment: readonly Token[]; fast: boolean }) {
+  const cells = useMemo(() => [...segment, ...segment], [segment]);
+  // 滚动带高度 = 2 份 × 6 格，按列高的 rows 格换算；动画从 -50%（第二份顶端）匀速移到 0，正好一份，循环无缝。
+  const style = {
+    height: `${(cells.length / rows) * 100}%`,
+    animationDuration: `${segment.length / (fast ? ROLL_CELLS_PER_SECOND_FAST : ROLL_CELLS_PER_SECOND)}s`,
+  } as CSSProperties;
+  return <div className="rabbit-rolling-track" style={style}>{cells.map((entry, index) => <div className="rabbit-cell" key={index}><RabbitSymbol entry={entry} bet={bet} /></div>)}</div>;
 }
 
 export default function JadeRabbitApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [board, setBoard] = useState<Board>(() => openingBoard());
   const [spinningReels, setSpinningReels] = useState<boolean[]>([false, false, false]);
+  // 刚停下的列：播放一次减速回弹。
+  const [landingReels, setLandingReels] = useState<boolean[]>([false, false, false]);
+  const [rollSegments, setRollSegments] = useState<Token[][]>(() => rollingSegments(false));
+  const spinningRef = useRef<boolean[]>([false, false, false]);
+  const landingTimers = useRef<number[]>([]);
   const [anticipating, setAnticipating] = useState(false);
   const [credits, setCredits] = useState(0);
   const [bet, setBet] = useState(0);
@@ -282,6 +307,24 @@ export default function JadeRabbitApp() {
     return () => window.clearTimeout(timer);
   }, [presentation, modeTotalWin]);
 
+  /** 停下指定的列；正在转的列停下时播放一次减速回弹。 */
+  function stopReels(columns: readonly number[]) {
+    const landed = columns.filter((column) => spinningRef.current[column]);
+    spinningRef.current = spinningRef.current.map((value, index) => (columns.includes(index) ? false : value));
+    setSpinningReels([...spinningRef.current]);
+    if (landed.length === 0) return;
+    setLandingReels((current) => current.map((value, index) => (landed.includes(index) ? true : value)));
+    const timer = window.setTimeout(() => setLandingReels((current) => current.map((value, index) => (landed.includes(index) ? false : value))), 420);
+    landingTimers.current.push(timer);
+  }
+
+  useEffect(() => () => { landingTimers.current.forEach((timer) => window.clearTimeout(timer)); }, []);
+
+  // 空闲时就把下一局的滚动带准备好（已经渲染在页面里，只是隐藏），开始转时不用再临时创建元素、解码图片。
+  useEffect(() => {
+    if (!busy) setRollSegments(rollingSegments(inMode));
+  }, [busy, inMode]);
+
   async function animateResult(result: SpinResult, startedAt: number) {
     if (stopRequested.current) return;
     const totalWait = fast ? 420 : 690;
@@ -295,7 +338,7 @@ export default function JadeRabbitApp() {
     for (let column = 0; column < BOARD_HEIGHTS.length; column += 1) {
       if (column === 2 && expectBonus) { setAnticipating(true); await wait(fast ? 260 : 620); }
       if (stopRequested.current) return;
-      setSpinningReels((current) => current.map((value, index) => index === column ? false : value));
+      stopReels([column]);
       if (column === 2) setAnticipating(false);
       if (column < 2) await wait(fast ? 130 : 220);
     }
@@ -307,7 +350,7 @@ export default function JadeRabbitApp() {
       // 立即停止：结果还没回来时只记下请求，等结果到了直接停在新盘面上，不会先停在上一局的盘面。
       stopRequested.current = true;
       const arrived = pendingResult.current;
-      if (arrived) { setBoard(arrived.grid); if (arrived.mode === 'free') setModeBoardShown(true); setSpinningReels([false, false, false]); setAnticipating(false); }
+      if (arrived) { setBoard(arrived.grid); if (arrived.mode === 'free') setModeBoardShown(true); stopReels([0, 1, 2]); setAnticipating(false); }
       setMessage(arrived ? '已停止' : '立即停止，等待服务器结算…');
       return;
     }
@@ -323,6 +366,7 @@ export default function JadeRabbitApp() {
     resultBonusWins.current = [];
     setMessage(isFree ? `财富旋转 · 剩余 ${freeSpins!.remaining} 次` : '旋转中…');
     if (!isFree) setCredits((value) => value - bet);
+    spinningRef.current = [true, true, true];
     setSpinningReels([true, true, true]);
     const startedAt = performance.now();
     try {
@@ -331,7 +375,7 @@ export default function JadeRabbitApp() {
       if (result.gameId !== 'jade-rabbit') throw new Error('服务器返回了不匹配的游戏盘面。');
       pendingResult.current = result;
       await animateResult(result, startedAt);
-      setSpinningReels([false, false, false]); setAnticipating(false); setBoard(result.grid);
+      stopReels([0, 1, 2]); setAnticipating(false); setBoard(result.grid);
       if (result.mode === 'paid') mainBoardRef.current = result.grid;
       if (result.mode === 'free') setModeBoardShown(true);
       setLastRoundId(result.roundId);
@@ -361,7 +405,7 @@ export default function JadeRabbitApp() {
       else setMessage(isFree ? '本次财富旋转未凑够 5 个牌匾' : '本局未中奖，再来一次');
       if (result.capped) { setMessage('本轮已达到 5000 倍封顶。'); autoRef.current = 0; setAutoRemaining(null); }
     } catch (e) {
-      setSpinningReels([false, false, false]); setAnticipating(false);
+      stopReels([0, 1, 2]); setAnticipating(false);
       const err = e as Error & { status?: number };
       setMessage(err.status === 402 ? '余额不足，请回大厅充值' : err.message);
       // 出错时停止自动旋转，并按服务器的真实状态同步余额和玉兔模式。
@@ -450,11 +494,11 @@ export default function JadeRabbitApp() {
   const displayBoard = presentation === 'mode-intro' || (presentation.startsWith('mode-') && presentation !== 'mode-trigger' && !modeBoardShown)
     ? modeBlankBoard
     : board;
-  const rollingSeeds = (inMode ? modeBlankBoard : board).map((column) => column.length ? column : [EMPTY_TOKEN]) as unknown as Board;
   const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
 
-  const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
-    {spinningReels[x] ? <RollingColumn height={BOARD_HEIGHTS[x]} bet={bet} seed={rollingSeeds[x]} /> : column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
+  const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${landingReels[x] && !spinningReels[x] ? 'is-landing' : ''} ${fast ? 'is-fast' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
+    <RollingColumn rows={BOARD_HEIGHTS[x]} bet={bet} segment={rollSegments[x]} fast={fast} />
+    {column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
   </div>;
   const topBannerText = modeLook ? infoItems[0] : infoItems[tickerIndex];
   const bottomBarText = win > 0 && !busy ? `赢得 ${fmt(win)}` : modeLook ? (inMode ? `玉兔模式！剩余 ${freeSpins!.remaining} 次` : '玉兔模式！') : infoItems[(tickerIndex + 1) % infoItems.length];
