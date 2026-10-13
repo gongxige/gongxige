@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PAYLINES } from './engine/index.ts';
 import type { ArtLayout } from './artLayout.ts';
-import { lineBadges, winningCells, type ShownLine } from './winDisplay.ts';
+import { bigWinLabel, bigWinTier, countUpValue, lineBadges, winningCells, type ShownLine } from './winDisplay.ts';
 
 const layout: ArtLayout = {
   imageSize: { width: 931, height: 1230 },
@@ -34,4 +34,28 @@ test('STEP-53 线号在两侧立柱上，对着起点格和终点格，同一格
     const ys = badges.map((badge) => badge.y).sort((a, b) => a - b);
     for (let i = 1; i < ys.length; i += 1) assert.ok(ys[i] - ys[i - 1] >= cell * 0.2);
   }
+});
+
+test('STEP-54 大奖门槛：19 倍不显示，20 倍「大奖」，50 倍「巨奖」', () => {
+  assert.equal(bigWinTier(1_900, 100), null);
+  assert.equal(bigWinTier(1_999, 100), null);
+  assert.equal(bigWinTier(2_000, 100), 'big');
+  assert.equal(bigWinTier(4_999, 100), 'big');
+  assert.equal(bigWinTier(5_000, 100), 'mega');
+  assert.equal(bigWinTier(0, 100), null);
+  assert.equal(bigWinLabel(2_000, 100), '大奖');
+  assert.equal(bigWinLabel(5_000, 100), '巨奖');
+  // 滚动开头（数字还小）也显示「大奖」
+  assert.equal(bigWinLabel(10, 100), '大奖');
+});
+
+test('STEP-54 数字滚动从 0 单调增加，到时间正好等于总额', () => {
+  let last = -1;
+  for (let t = 0; t <= 3.2; t += 0.05) {
+    const value = countUpValue(7_700, t);
+    assert.ok(value >= last && value <= 7_700);
+    last = value;
+  }
+  assert.equal(countUpValue(7_700, 3), 7_700);
+  assert.equal(countUpValue(7_700, 0), 0);
 });

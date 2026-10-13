@@ -395,23 +395,6 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 @media (max-height: 520px) and (orientation: landscape) { .rabbit-stage { width: 100vw; height: 100dvh; min-height: 0; }.rabbit-header { height: 15%; }.rabbit-roof { left: 3%; right: auto; top: 12%; width: 27%; height: 32%; }.rabbit-title b { font-size: 3.4cqw; }.rabbit-title small { font-size: 1.15cqw; }.rabbit-home, .rabbit-info-button { width: 5.5cqw; height: 5.5cqw; font-size: 3cqw; }.rabbit-couplet { top: 24%; height: 38%; width: 4.2%; font-size: 2.2cqw; }.rabbit-couplet-left { left: 1%; }.rabbit-couplet-right { right: 1%; }.rabbit-machine { left: 20%; right: 20%; top: 17%; height: 58%; }.rabbit-info-strip { left: 27%; right: 27%; top: 76%; height: 8%; font-size: 1.7cqw; }.rabbit-mode-badge { top: 14%; font-size: 1.7cqw; }.rabbit-bottom { height: 22%; padding: .6cqw 2%; }.rabbit-stats { position: absolute; left: 2%; top: 10%; width: 23%; height: 78%; }.rabbit-stats strong { font-size: 2.2cqw; }.rabbit-controls { margin-left: 25%; height: 64%; }.rabbit-message { position: absolute; left: 25%; right: 2%; bottom: 0; height: 22%; font-size: 1.3cqw; }.rabbit-demo-note { font-size: .9cqw; }.rabbit-modal p, .rabbit-modal li { font-size: 1.5cqw; } }
 @media (prefers-reduced-motion: reduce) { .rabbit-mascot, .rabbit-reel-column.is-anticipating { animation: none; } }
 
-
-
-.rabbit-mode-overlay { position: absolute; left: 50%; z-index: 16; transform: translateX(-50%); display: grid; justify-items: center; text-align: center; pointer-events: none; text-shadow: 0 .3cqw #571321, 0 0 1cqw #ffcf58; }
-
-
-.rabbit-mode-overlay { inset: 0; align-content: center; gap: 1cqw; background: radial-gradient(circle, #a92d36b8, #4a0718d9 55%, #1c0611e8); animation: rabbit-overlay-in .5s ease-out both; }
-.rabbit-mode-overlay b { color: #ffe182; font: 900 8cqw/1 "KaiTi", serif; letter-spacing: .7cqw; }.rabbit-mode-overlay span { color: #fff3c4; font-size: 3cqw; }
-.rabbit-mode-trigger { background: radial-gradient(circle, #ffe68c66, #831522d9 42%, #200612f0); }.rabbit-mode-trigger b { animation: rabbit-gold-burst .8s ease-in-out infinite alternate; }
-.rabbit-mode-intro { background: radial-gradient(circle, #e55446, #8e1728 48%, #3b0818); }.rabbit-mode-intro::after { content: ''; position: absolute; inset: 18%; border: .3cqw solid #ffdf78; border-radius: 50%; box-shadow: 0 0 4cqw #ffd35c, inset 0 0 4cqw #ffad3d; animation: rabbit-seal-spin 1.8s linear infinite; }
-.rabbit-mode-finale, .rabbit-mode-total { background: radial-gradient(circle, #d4473fcc, #710c22e8 50%, #270612f5); }.rabbit-mode-finale b { font-size: 11cqw; }.rabbit-mode-finale i { position: absolute; inset: 0; overflow: hidden; }.rabbit-mode-finale em { position: absolute; color: #ffe26b; font-style: normal; font-size: 3.5cqw; animation: rabbit-coin-fall 1.7s linear infinite; }
-.rabbit-mode-finale em:nth-child(3n) { left: 18%; animation-delay: -.8s; }.rabbit-mode-finale em:nth-child(3n+1) { left: 50%; animation-delay: -.25s; }.rabbit-mode-finale em:nth-child(3n+2) { left: 78%; animation-delay: -1.2s; }
-.rabbit-mode-total { background: radial-gradient(circle, #ef9d42cc, #821d2ee8 48%, #2a0712f2); }.rabbit-mode-total b { font-size: 6.2cqw; }
-@keyframes rabbit-overlay-in { from { opacity: 0; transform: translateX(-50%) scale(.8); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
-
-@keyframes rabbit-gold-burst { to { transform: translateY(-1.5cqw) scale(1.12); filter: brightness(1.35); } }
-@keyframes rabbit-seal-spin { to { transform: rotate(360deg); } }
-@keyframes rabbit-coin-fall { from { transform: translateY(-12cqw) rotate(0); opacity: 0; } 18% { opacity: 1; } to { transform: translateY(80cqw) rotate(360deg); opacity: .15; } }
 @keyframes rabbit-trigger-leap { 0%, 100% { transform: translateX(-50%) translateY(0) rotate(0); } 35% { transform: translateX(-50%) translateY(-6cqw) rotate(-5deg); } 58% { transform: translateX(-50%) translateY(-4cqw) rotate(5deg); } }
 @keyframes rabbit-finale-celebrate { 0%, 100% { transform: translateX(-50%) rotate(0) translateY(0); } 25% { transform: translateX(-50%) rotate(-12deg) translateY(-1cqw); } 55% { transform: translateX(-50%) rotate(360deg) translateY(-4cqw); } 78% { transform: translateX(-50%) rotate(350deg) translateY(0); } }
 @keyframes rabbit-tail-open { from { transform: rotate(0) scale(.85); } to { transform: rotate(28deg) scale(1.15); } }
@@ -472,9 +455,6 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-payline-grid rect.is-on { fill: #ffb45c; }
 @media (max-width: 520px) { .rabbit-payline-grid figcaption { font-size: 2.4cqw; } .rabbit-payline-grid svg { max-width: 12cqw; } }
 /* STEP-48：bug 修正 */
-/* 7. 模式叠加画面铺满整个舞台：inset:0 时不能再 translateX(-50%) */
-.rabbit-mode-overlay { left: 0; transform: none; animation-name: rabbit-overlay-fill-in; }
-@keyframes rabbit-overlay-fill-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
 /* 17. 停下的格子里，SVG 和图片一样按格子大小完整缩放，不按宽度撑高被裁掉 */
 .rabbit-reel-column > .rabbit-cell > svg.rabbit-symbol { position: absolute; inset: 4%; width: 92%; height: 92%; }
 .rabbit-reel-column > .rabbit-cell > .rabbit-plate-image { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -557,6 +537,61 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 @media (prefers-reduced-motion: reduce) {
   .rabbit-cell.is-dim, .rabbit-cell.is-winning > .rabbit-symbol, .rabbit-line-layer polyline, .rabbit-line-layer .rabbit-line-core, .rabbit-line-badge, .rabbit-cell.is-bonus-collect::after, .rabbit-cell.is-bonus-collect > .rabbit-symbol { animation: none; }
   .rabbit-cell.is-winning::before, .rabbit-cell.is-winning::after { display: none; }
+}
+/* STEP-54：触发财富旋转、横幅、金光转场、大奖画面（docs/JADE_RABBIT_MOTION.md 第三节；只用本游戏自己的文字和 CSS 画法） */
+/* 触发：卷轴还在转，底色在 1.4 秒里慢慢变红；两侧射出金光；盘面上方出现标题大字 */
+.has-art.mode-trigger .rabbit-reel-column { background: linear-gradient(180deg, #24205c, #19164a 50%, #221d58); animation: rabbit-reel-redden 1.4s ease-in .3s both; }
+@keyframes rabbit-reel-redden { to { box-shadow: inset 0 0 0 100vmax #8f1420, inset 0 0 2cqw #3d040c; } }
+.rabbit-trigger { position: absolute; inset: 0; z-index: 14; pointer-events: none; overflow: hidden; }
+.rabbit-trigger-ray { position: absolute; top: 18%; bottom: 14%; width: 46%; opacity: 0; filter: blur(.6cqw); animation: rabbit-ray-in .45s ease-out .1s both, rabbit-ray-flicker .32s ease-in-out .6s infinite alternate; }
+.rabbit-trigger-ray.is-left { left: -6%; background: radial-gradient(ellipse at 0% 50%, #fffbe0 0%, #ffd75a 18%, #ff9d1c66 42%, transparent 70%), repeating-conic-gradient(from 60deg at 0% 50%, #fff3b055 0 4deg, transparent 4deg 11deg); }
+.rabbit-trigger-ray.is-right { right: -6%; background: radial-gradient(ellipse at 100% 50%, #fffbe0 0%, #ffd75a 18%, #ff9d1c66 42%, transparent 70%), repeating-conic-gradient(from 240deg at 100% 50%, #fff3b055 0 4deg, transparent 4deg 11deg); }
+@keyframes rabbit-ray-in { from { opacity: 0; transform: scaleX(.3); } to { opacity: 1; transform: none; } }
+@keyframes rabbit-ray-flicker { to { opacity: .72; } }
+.rabbit-trigger-title { position: absolute; left: 0; right: 0; top: 40%; display: grid; justify-items: center; transform: translateY(-50%); animation: rabbit-title-in .5s cubic-bezier(.2, 1.6, .4, 1) .25s both; }
+.rabbit-trigger-title b { font: 900 15cqw/1 "KaiTi", "STKaiti", "Microsoft YaHei", serif; letter-spacing: .4cqw; background: linear-gradient(180deg, #fffbe2 0%, #ffe270 38%, #f7a51e 62%, #ffd85c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: .5cqw #8a1d10; filter: drop-shadow(0 .5cqw 0 #5a0d12) drop-shadow(0 0 2cqw #ffcf4a); }
+.rabbit-trigger-title small { margin-top: 1cqw; padding: .5cqw 3cqw; border-radius: 99px; color: #fff4c4; font: 800 4cqw/1.2 "KaiTi", serif; background: linear-gradient(90deg, transparent, #b5182c 20%, #b5182c 80%, transparent); text-shadow: 0 .2cqw 0 #5a0d12; }
+@keyframes rabbit-title-in { from { opacity: 0; transform: translateY(-50%) scale(.3); } to { opacity: 1; transform: translateY(-50%) scale(1); } }
+/* 「8 次财富旋转」红色卷轴横幅：展开，两侧鞭炮，背景烟花，吉祥物从横幅后探出 */
+.rabbit-intro { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; pointer-events: none; overflow: hidden; background: radial-gradient(circle at 50% 46%, #ffcf5a55, #3a0710cc 60%, #12030ae6); animation: rabbit-fade-in .3s ease-out both; }
+@keyframes rabbit-fade-in { from { opacity: 0; } }
+.rabbit-scroll { position: relative; width: 52cqw; height: 50cqw; display: grid; place-items: center; align-content: center; gap: 1.5cqw; border-left: .8cqw solid #ffcf5a; border-right: .8cqw solid #ffcf5a; background: radial-gradient(circle at 50% 42%, #ffcf4a 0 14%, #ff8a1c 26%, transparent 40%), linear-gradient(90deg, #a10f1e, #e0302c 30%, #e83a2f 70%, #a10f1e); box-shadow: 0 0 4cqw #ffb83b99, inset 0 0 3cqw #6a0a12; transform-origin: 50% 50%; animation: rabbit-scroll-open .4s cubic-bezier(.2, 1.3, .4, 1) .05s both; }
+.rabbit-scroll-roller { position: absolute; left: -3cqw; right: -3cqw; height: 4cqw; border-radius: 2cqw; background: linear-gradient(180deg, #ffe69a, #c4781e 45%, #7a3a0c); box-shadow: 0 .4cqw .8cqw #00000066; }
+.rabbit-scroll-roller.is-top { top: -3cqw; } .rabbit-scroll-roller.is-bottom { bottom: -3cqw; }
+.rabbit-scroll b { font: 900 22cqw/1 Georgia, "Times New Roman", serif; background: linear-gradient(180deg, #fffde8, #ffe46a 45%, #f39a12 70%, #ffdd6b); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: .5cqw #8a1d10; filter: drop-shadow(0 .5cqw 0 #5a0d12) drop-shadow(0 0 1.5cqw #fff1a6); animation: rabbit-number-pop .5s cubic-bezier(.2, 1.8, .4, 1) .35s both; }
+.rabbit-scroll span { color: #fff3c0; font: 900 6.2cqw/1 "KaiTi", "STKaiti", serif; letter-spacing: .5cqw; text-shadow: 0 .35cqw 0 #5a0d12, 0 0 1.2cqw #ffcf4a; }
+@keyframes rabbit-scroll-open { from { transform: scaleY(.08); opacity: .6; } to { transform: none; opacity: 1; } }
+@keyframes rabbit-number-pop { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+.rabbit-intro-mascot { position: absolute; left: 50%; top: calc(50% - 41cqw); width: 30cqw; height: 22cqw; transform: translateX(-50%); animation: rabbit-mascot-peek .5s ease-out .45s both; }
+.rabbit-intro-mascot .rabbit-mascot { bottom: 0; width: 100%; animation: none; }
+@keyframes rabbit-mascot-peek { from { transform: translateX(-50%) translateY(12cqw); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+.rabbit-firecrackers { position: absolute; top: 34%; width: 6cqw; height: 34cqw; background: repeating-linear-gradient(180deg, #e8352c 0 3.2cqw, #ffd35a 3.2cqw 3.7cqw, #b81822 3.7cqw 5.4cqw, #ffd35a 5.4cqw 5.9cqw); border-radius: 1.2cqw; box-shadow: 0 0 1.4cqw #ff8a1c; animation: rabbit-crackers-shake .12s linear .4s infinite alternate; }
+.rabbit-firecrackers.is-left { left: calc(50% - 35cqw); } .rabbit-firecrackers.is-right { right: calc(50% - 35cqw); }
+@keyframes rabbit-crackers-shake { from { transform: rotate(-3deg); } to { transform: rotate(3deg) translateY(-.4cqw); } }
+.rabbit-firework { position: absolute; width: 28cqw; aspect-ratio: 1; border-radius: 50%; background: repeating-conic-gradient(#fff3a8 0 3deg, transparent 3deg 18deg); -webkit-mask: radial-gradient(circle, transparent 28%, #000 30%, #000 46%, transparent 50%); mask: radial-gradient(circle, transparent 28%, #000 30%, #000 46%, transparent 50%); opacity: 0; animation: rabbit-firework 1.1s ease-out infinite; }
+.rabbit-firework.is-0 { left: 6%; top: 10%; animation-delay: .2s; } .rabbit-firework.is-1 { right: 4%; top: 14%; animation-delay: .5s; filter: hue-rotate(-40deg); } .rabbit-firework.is-2 { left: 14%; bottom: 12%; animation-delay: .8s; filter: hue-rotate(160deg); } .rabbit-firework.is-3 { right: 10%; bottom: 16%; animation-delay: .35s; } .rabbit-firework.is-4 { left: 40%; top: 4%; animation-delay: .95s; filter: hue-rotate(200deg); }
+@keyframes rabbit-firework { 0% { opacity: 0; transform: scale(.2); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.15); } }
+/* 金光转场：一道金光铺满画面再退去，期间换成玉兔模式盘面 */
+.rabbit-flash { position: absolute; inset: 0; z-index: 17; pointer-events: none; background: radial-gradient(circle at 50% 50%, #fffdf0, #ffe680 35%, #ffb22e 70%, #ff8a1c); animation: rabbit-flash .9s ease-in-out both; }
+@keyframes rabbit-flash { 0% { opacity: 0; } 30%, 55% { opacity: 1; } 100% { opacity: 0; } }
+/* 大奖画面：旋转的金色光芒、吉祥物、「大奖 / 巨奖」字样和滚动的数字，金币往下落；点一下跳过 */
+.rabbit-bigwin { position: absolute; inset: 0; z-index: 18; display: grid; justify-items: center; align-content: center; gap: 1cqw; overflow: hidden; cursor: pointer; background: radial-gradient(circle at 50% 46%, #ffe27a, #f2901e 30%, #a3241a 62%, #3a0a0ce8); animation: rabbit-fade-in .35s ease-out both; }
+.rabbit-bigwin-rays { position: absolute; left: 50%; top: 46%; width: 220cqw; aspect-ratio: 1; transform: translate(-50%, -50%); background: repeating-conic-gradient(#fff6c033 0 7deg, transparent 7deg 18deg); animation: rabbit-rays-spin 9s linear infinite; }
+@keyframes rabbit-rays-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+.rabbit-bigwin-mascot { position: relative; width: 46cqw; height: 34cqw; }
+.rabbit-bigwin-mascot .rabbit-mascot { bottom: 0; width: 100%; }
+.rabbit-bigwin-label { position: relative; font: 900 16cqw/1 "KaiTi", "STKaiti", "Microsoft YaHei", serif; letter-spacing: 1cqw; -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: .55cqw #fff; paint-order: stroke fill; filter: drop-shadow(0 .6cqw 0 #3a1200) drop-shadow(0 0 1.5cqw #fff3b0); animation: rabbit-number-pop .45s cubic-bezier(.2, 1.8, .4, 1) both; }
+.rabbit-bigwin.is-big .rabbit-bigwin-label { background-image: linear-gradient(180deg, #e8fbff, #5ec8ff 45%, #1d6fd6 80%); }
+.rabbit-bigwin.is-mega .rabbit-bigwin-label { background-image: linear-gradient(180deg, #f2ffe0, #7ee05a 45%, #1f9a3a 80%); }
+.rabbit-bigwin-amount { position: relative; font: 900 12.5cqw/1.05 Georgia, "Times New Roman", serif; background: linear-gradient(180deg, #fffde8, #ffe46a 40%, #f39a12 68%, #ffdd6b); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: .45cqw #7a2a06; filter: drop-shadow(0 .5cqw 0 #3a1200); font-variant-numeric: tabular-nums; }
+.rabbit-bigwin small { position: absolute; bottom: 5%; color: #fff3c4cc; font-size: max(11px, 2.6cqw); }
+.rabbit-coin-rain { position: absolute; inset: 0; z-index: 16; overflow: hidden; pointer-events: none; }
+.rabbit-coin-rain em { position: absolute; top: 0; width: 5cqw; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fffbe0, #ffd34a 40%, #c47a0c 75%); box-shadow: inset 0 0 0 .5cqw #e9a81e; animation: rabbit-coin-fall 1.6s linear infinite; }
+.rabbit-coin-rain em:nth-child(even) { width: 3.6cqw; animation-duration: 1.25s; }
+@keyframes rabbit-coin-fall { from { transform: translateY(-12cqw) rotate(0); opacity: 0; } 18% { opacity: 1; } to { transform: translateY(240cqw) rotate(360deg); opacity: .15; } }
+@media (prefers-reduced-motion: reduce) {
+  .has-art.mode-trigger .rabbit-reel-column, .rabbit-trigger-ray, .rabbit-trigger-title, .rabbit-intro, .rabbit-scroll, .rabbit-scroll b, .rabbit-intro-mascot, .rabbit-firecrackers, .rabbit-bigwin, .rabbit-bigwin-rays, .rabbit-bigwin-label { animation: none; }
+  .rabbit-firework, .rabbit-coin-rain, .rabbit-flash { display: none; }
 }
 /* STEP-51：规则与赔付表，结构参考参考游戏规则页（分节、居中标题、赔付表百搭单独一行） */
 .rabbit-rules { width: min(94%, 600px); background: #23242c; border-color: #6b5a3a; color: #d9dae0; }

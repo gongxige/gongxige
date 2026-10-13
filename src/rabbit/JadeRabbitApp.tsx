@@ -17,7 +17,7 @@ import {
   type Token,
 } from './engine/index.ts';
 import { cellCenter, rectToPercent, type ArtLayout } from './artLayout.ts';
-import { lineBadges, WIN_TIMING, winningCells } from './winDisplay.ts';
+import { BIG_WIN, bigWinLabel, bigWinTier, countUpValue, lineBadges, MODE_FLOW_MS, WIN_TIMING, winningCells } from './winDisplay.ts';
 import { markLocalArtFailed, preloadLocalArt, useLocalArt } from './localArt.ts';
 import { openingBoard } from './openingBoard.ts';
 import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
@@ -50,14 +50,14 @@ type SpinResult = {
 /** 谁发起的旋转：玩家点击/空格、自动旋转、玉兔模式自己接着转。 */
 type SpinKind = 'manual' | 'auto' | 'mode';
 
-type RabbitPresentation = 'idle' | 'bonus-collect' | 'mode-trigger' | 'mode-intro' | 'mode-spin' | 'mode-collect' | 'mode-finale' | 'mode-total';
+type RabbitPresentation = 'idle' | 'bonus-collect' | 'big-win' | 'trigger-wins' | 'mode-trigger' | 'mode-intro' | 'mode-flash' | 'mode-spin' | 'mode-collect' | 'mode-finale' | 'mode-total';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const fmt = (value: number) => value.toLocaleString('zh-CN');
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const EMPTY_TOKEN: Token = { symbolId: 'BLANK', stackGroupId: 'empty' };
 /** 这些画面在播放叠加动画，期间不接受新的旋转（按钮、空格、自动都一样）。 */
-const LOCKED_PRESENTATIONS: ReadonlySet<string> = new Set(['bonus-collect', 'mode-trigger', 'mode-intro', 'mode-collect', 'mode-finale', 'mode-total']);
+const LOCKED_PRESENTATIONS: ReadonlySet<string> = new Set(['bonus-collect', 'big-win', 'trigger-wins', 'mode-trigger', 'mode-intro', 'mode-flash', 'mode-collect', 'mode-finale', 'mode-total']);
 
 /** 规则页列出的牌匾档位直接取自正式轴带，避免列出实际不会出现的档位。 */
 const tiersOf = (strips: readonly (readonly Token[])[]) => [...new Set(strips.flat().filter((entry) => entry.symbolId === 'BONUS_PLATE').map((entry) => BONUS_MULTIPLIERS[entry.bonusTier ?? 0]))].sort((a, b) => a - b);
@@ -245,6 +245,69 @@ function RulesModal({ bet, bets, onClose }: { bet: number; bets: readonly number
 
       <button className="rabbit-primary" type="button" onClick={onClose}>知道了</button>
     </section>
+  </div>;
+}
+
+/** STEP-54：触发财富旋转时卷轴还在转，两侧射出金光，盘面上方出现游戏标题大字（用本游戏自己的名字）。 */
+function TriggerOverlay() {
+  return <div className="rabbit-trigger" role="status" aria-label="触发财富旋转">
+    <i className="rabbit-trigger-ray is-left" /><i className="rabbit-trigger-ray is-right" />
+    <div className="rabbit-trigger-title"><b>玉兔送财</b><small>财富旋转</small></div>
+  </div>;
+}
+
+/** STEP-54：「8 次财富旋转」红色卷轴横幅，两侧鞭炮，背景放烟花，吉祥物从横幅后面探出来。 */
+function IntroBanner({ spins }: { spins: number }) {
+  return <div className="rabbit-intro" role="status" aria-label={`${spins} 次财富旋转`}>
+    {[0, 1, 2, 3, 4].map((index) => <i className={`rabbit-firework is-${index}`} key={index} />)}
+    <div className="rabbit-intro-mascot"><RabbitMascot mood="trigger" /></div>
+    <div className="rabbit-scroll">
+      <i className="rabbit-scroll-roller is-top" /><i className="rabbit-scroll-roller is-bottom" />
+      <b>{spins}</b><span>财富旋转</span>
+    </div>
+    <i className="rabbit-firecrackers is-left" /><i className="rabbit-firecrackers is-right" />
+  </div>;
+}
+
+function CoinRain() {
+  return <div className="rabbit-coin-rain" aria-hidden="true">{Array.from({ length: 16 }, (_, index) => <em key={index} style={{ left: `${(index * 37) % 100}%`, animationDelay: `${-(index * 0.23) % 1.6}s` }} />)}</div>;
+}
+
+/**
+ * STEP-54：大奖画面。数字 3 秒从 0 滚到赢分，滚过 50 倍投注时「大奖」变成「巨奖」，停 2 秒后结束；
+ * 点一下：还在滚就直接跳到最终数字，已经停住就马上结束。减少动态效果时直接显示最终数字。
+ */
+function BigWinOverlay({ amount, bet, delaySeconds, onDone }: { amount: number; bet: number; delaySeconds: number; onDone: () => void }) {
+  const reduced = useMemo(prefersReducedMotion, []);
+  const [shown, setShown] = useState(reduced ? amount : 0);
+  const [settled, setSettled] = useState(reduced);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+  useEffect(() => {
+    if (settled) return;
+    const startedAt = performance.now() + delaySeconds * 1000;
+    // 用定时器而不是 requestAnimationFrame：标签页在后台时也会走完，不会卡住玉兔模式和自动旋转。
+    const timer = window.setInterval(() => {
+      const value = countUpValue(amount, (performance.now() - startedAt) / 1000);
+      setShown(value);
+      if (value >= amount) setSettled(true);
+    }, 40);
+    return () => window.clearInterval(timer);
+  }, [settled, amount, delaySeconds]);
+  useEffect(() => {
+    if (!settled) return;
+    const timer = window.setTimeout(() => doneRef.current(), BIG_WIN.holdSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [settled]);
+  const skip = () => { if (settled) doneRef.current(); else { setShown(amount); setSettled(true); } };
+  const label = bigWinLabel(shown, bet);
+  return <div className={`rabbit-bigwin ${label === '巨奖' ? 'is-mega' : 'is-big'}`} style={{ animationDelay: `${delaySeconds}s` }} role="button" tabIndex={0} aria-label={`${label} ${fmt(amount)}，点击跳过`} onClick={skip} onKeyDown={(event) => { if (event.key === 'Enter') skip(); }}>
+    <i className="rabbit-bigwin-rays" />
+    <div className="rabbit-bigwin-mascot"><RabbitMascot mood="finale" /></div>
+    <b className="rabbit-bigwin-label" key={label}>{label}</b>
+    <strong className="rabbit-bigwin-amount">{fmt(shown)}</strong>
+    <CoinRain />
+    <small>点击跳过</small>
   </div>;
 }
 
@@ -436,7 +499,7 @@ export default function JadeRabbitApp() {
   // 服务器结果已到、还在播放停轴时的结果；「立即停止」只能停在这个结果上。
   const pendingResult = useRef<SpinResult | null>(null);
   const resultBonusWins = useRef<SpinResult['bonusWins']>([]);
-  const bonusCollectNext = useRef<'idle' | 'mode-trigger'>('idle');
+  const bonusCollectNext = useRef<RabbitPresentation>('idle');
   // 最近一局付费旋转的盘面：玉兔模式结束后回到主游戏时恢复它，主游戏里不再留空白格。
   const mainBoardRef = useRef<Board | null>(null);
   const presentationRef = useRef(presentation);
@@ -481,15 +544,17 @@ export default function JadeRabbitApp() {
     return () => window.clearTimeout(timer);
   }, [presentation]);
 
+  // 触发局的中奖线展示完，再进入「8 次财富旋转」横幅。
   useEffect(() => {
-    if (presentation !== 'mode-trigger') return;
-    const timer = window.setTimeout(() => setPresentation('mode-intro'), 900);
+    if (presentation !== 'trigger-wins') return;
+    const timer = window.setTimeout(() => setPresentation('mode-intro'), MODE_FLOW_MS.triggerWins);
     return () => window.clearTimeout(timer);
   }, [presentation]);
 
+  // 横幅 → 金光转场 → 玉兔模式盘面。
   useEffect(() => {
-    if (presentation !== 'mode-intro') return;
-    const timer = window.setTimeout(() => setPresentation('mode-spin'), 1_400);
+    if (presentation !== 'mode-intro' && presentation !== 'mode-flash') return;
+    const timer = window.setTimeout(() => setPresentation(presentation === 'mode-intro' ? 'mode-flash' : 'mode-spin'), presentation === 'mode-intro' ? MODE_FLOW_MS.intro : MODE_FLOW_MS.flash);
     return () => window.clearTimeout(timer);
   }, [presentation]);
 
@@ -498,10 +563,11 @@ export default function JadeRabbitApp() {
       const timer = window.setTimeout(() => setPresentation(freeSpins?.remaining ? 'mode-spin' : 'mode-finale'), 1_400);
       return () => window.clearTimeout(timer);
     }
-    if (presentation !== 'mode-finale') return;
-    const timer = window.setTimeout(() => setPresentation('mode-total'), 2_600);
+    // 本轮总赢分够大奖时由大奖画面结束后接着走；不够就直接显示「共赢得」。
+    if (presentation !== 'mode-finale' || bigWinTier(modeTotalWin, bet)) return;
+    const timer = window.setTimeout(() => setPresentation('mode-total'), 300);
     return () => window.clearTimeout(timer);
-  }, [presentation]);
+  }, [presentation, modeTotalWin, bet]);
 
   useEffect(() => {
     if (presentation !== 'mode-total') return;
@@ -513,7 +579,7 @@ export default function JadeRabbitApp() {
       setModeBoardShown(false);
       setMessage(`财富旋转结束 · 本轮共赢 ${fmt(modeTotalWin)}（含触发局），可以继续旋转`);
       setPresentation('idle');
-    }, 3_000);
+    }, MODE_FLOW_MS.total);
     return () => window.clearTimeout(timer);
   }, [presentation, modeTotalWin]);
 
@@ -541,6 +607,9 @@ export default function JadeRabbitApp() {
   /** 按参考视频的节奏依次停下三列（docs/JADE_RABBIT_MOTION.md 第一节）。 */
   async function animateResult(result: SpinResult, startedAt: number) {
     if (result.mode === 'free') setModeBoardShown(true);
+    // 触发局：结果到了先进入触发画面，卷轴多转一会儿再依次停下（STEP-54）。
+    const extra = result.triggered && !stopRequested.current ? MODE_FLOW_MS.triggerExtraSpin : 0;
+    if (result.triggered) setPresentation('mode-trigger');
     const decelStarts = fast ? COLUMN_DECEL_STARTS_FAST : COLUMN_DECEL_STARTS;
     const gap = (fast ? MIN_COLUMN_GAP_FAST : MIN_COLUMN_GAP) * 1000;
     // 前两列已有 4 个牌匾时，最后一列「有可能」补足 5 个就亮期待蓝光（不提前暴露最后一列的结果）。
@@ -549,7 +618,7 @@ export default function JadeRabbitApp() {
     const lands: Promise<void>[] = [];
     let previous = -Infinity;
     for (let column = 0; column < BOARD_HEIGHTS.length && !stopRequested.current; column += 1) {
-      let at = Math.max(startedAt + decelStarts[column] * 1000, previous + gap);
+      let at = Math.max(startedAt + extra + decelStarts[column] * 1000, previous + gap);
       if (column === 2 && expectBonus) {
         await wait(Math.max(0, at - performance.now()));
         if (stopRequested.current) break;
@@ -607,13 +676,16 @@ export default function JadeRabbitApp() {
       setBet(result.bet); setWin(result.payout); setFreeSpins(result.freeSpins); resultLineWins.current = result.lineWins ?? [];
       resultBonusWins.current = result.bonusWins ?? [];
       if (result.freeSpinsFinished) setModeTotalWin(result.freeSpinsFinished.totalWin);
+      // 付费局赢分够大奖时，中奖展示之后弹出大奖画面。财富旋转的单局不弹，整轮结束时按总额弹；触发局的赢分算在总额里。
+      const paidNext: RabbitPresentation = result.triggered ? 'mode-intro' : result.mode === 'paid' && bigWinTier(result.payout, result.bet) ? 'big-win' : 'idle';
+      if (result.triggered) setModeBoardShown(false);
       if (result.bonusWins && result.bonusWins.length >= 5 && result.mode !== 'free') {
-        bonusCollectNext.current = result.triggered ? 'mode-trigger' : 'idle';
-        if (result.triggered) setModeBoardShown(false);
+        bonusCollectNext.current = paidNext;
         setPresentation('bonus-collect');
       } else if (result.triggered) {
-        setModeBoardShown(false);
-        setPresentation('mode-trigger');
+        setPresentation(result.lineWins && result.lineWins.length > 0 ? 'trigger-wins' : 'mode-intro');
+      } else if (paidNext === 'big-win') {
+        setPresentation('big-win');
       } else if (result.mode === 'free') {
         setPresentation(result.bonusWins && result.bonusWins.length >= 5 ? 'mode-collect' : result.freeSpinsFinished ? 'mode-finale' : 'mode-spin');
       } else {
@@ -722,7 +794,8 @@ export default function JadeRabbitApp() {
   const betIndex = bets.indexOf(bet);
   const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;
   // 玉兔模式里：还没有本局财富旋转盘面时显示空白盘面；有了就显示真实盘面（包括牌匾不足 5 个的局和最后的结束画面）。
-  const displayBoard = presentation === 'mode-intro' || (presentation.startsWith('mode-') && presentation !== 'mode-trigger' && !modeBoardShown)
+  // 触发画面和「8 次财富旋转」横幅期间仍显示触发局停下的盘面（横幅盖在上面），金光转场时才换成空白的模式盘面。
+  const displayBoard = presentation === 'mode-flash' || (presentation.startsWith('mode-') && presentation !== 'mode-trigger' && presentation !== 'mode-intro' && !modeBoardShown)
     ? modeBlankBoard
     : board;
   const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
@@ -739,7 +812,7 @@ export default function JadeRabbitApp() {
     })}
   </div>;
   const topBannerText = modeLook ? infoItems[0] : infoItems[tickerIndex];
-  const bottomBarText = win > 0 && !busy ? `赢得 ${fmt(win)}` : modeLook ? (inMode ? `玉兔模式！剩余 ${freeSpins!.remaining} 次` : '玉兔模式！') : infoItems[(tickerIndex + 1) % infoItems.length];
+  const bottomBarText = presentation === 'mode-total' ? `共赢得 ${fmt(modeTotalWin)}` : win > 0 && !busy ? `赢得 ${fmt(win)}` : modeLook ? (inMode ? `玉兔模式！剩余 ${freeSpins!.remaining} 次` : '玉兔模式！') : infoItems[(tickerIndex + 1) % infoItems.length];
 
   return <main className="rabbit-shell">
     <section className={`rabbit-stage ${modeLook ? 'is-mode' : ''} ${presentation} ${spinning ? 'is-spinning' : ''} ${layout ? 'has-art' : ''}`} style={layout ? { '--art-ratio': layout.imageSize.width / layout.imageSize.height } as CSSProperties : undefined} aria-label="玉兔送财游戏画面">
@@ -772,11 +845,13 @@ export default function JadeRabbitApp() {
         <div className="rabbit-line-rail right">{Array.from({ length: 10 }, (_, index) => <span key={index} className={shownLineNumbers.has(index + 1) ? 'is-active' : ''}>{index + 1}</span>)}</div>
       </div>
       </>}
-      {presentation === 'mode-trigger' && <div className="rabbit-mode-overlay rabbit-mode-trigger" role="status"><b>玉兔送财</b><span>触发财富旋转</span></div>}
-      {presentation === 'mode-intro' && <div className="rabbit-mode-overlay rabbit-mode-intro" role="status"><b>8 次财富旋转</b><span>好运已经起航</span></div>}
-      {presentation === 'mode-finale' && <div className="rabbit-mode-overlay rabbit-mode-finale" role="status"><b>大奖</b><span>金币雨 · {fmt(modeTotalWin)}</span><i>{Array.from({ length: 18 }, (_, index) => <em key={index}>◆</em>)}</i></div>}
-      {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>本轮共赢 {fmt(modeTotalWin)}</b><span>财富旋转结束（含触发局）</span></div>}
-      {!layout && <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>}
+      {presentation === 'mode-trigger' && <TriggerOverlay />}
+      {presentation === 'mode-intro' && <IntroBanner spins={freeSpins?.remaining ?? MODE_SPINS} />}
+      {presentation === 'mode-flash' && <div className="rabbit-flash" aria-hidden="true" />}
+      {presentation === 'big-win' && <BigWinOverlay amount={win} bet={bet} delaySeconds={0.6} onDone={() => setPresentation('idle')} />}
+      {presentation === 'mode-finale' && bigWinTier(modeTotalWin, bet) && <BigWinOverlay amount={modeTotalWin} bet={bet} delaySeconds={0.3} onDone={() => setPresentation('mode-total')} />}
+      {presentation === 'mode-total' && <CoinRain />}
+      {!layout && <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{presentation === 'mode-total' ? `共赢得 ${fmt(modeTotalWin)}` : win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>}
       {inMode && !layout && <div className="rabbit-mode-badge">财富旋转 · 剩余 {freeSpins!.remaining} 次</div>}
       {error && <div className="rabbit-error" role="alert">{error} <a href="/">返回大厅</a></div>}
       <section className="rabbit-bottom" aria-label="游戏控制区">
