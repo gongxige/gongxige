@@ -205,7 +205,7 @@ src/ (UI)     React：每帧绘制滚轮 + 界面                               
 
 用户提供参考游戏试玩录像，要求转动和中奖特效做成一样。测量结果见 [JADE_RABBIT_MOTION.md](JADE_RABBIT_MOTION.md)，步骤见 [WORKFLOW_PLAN.md](WORKFLOW_PLAN.md) 阶段 15。
 
-- [ ] STEP-52 卷轴转动按参考视频
+- [x] STEP-52 卷轴转动按参考视频（2026-10-13，第 1 次尝试；三列停在 0.91、1.14、1.46 秒，全速 17.2 格/秒）
 - [ ] STEP-53 中奖展示按参考视频
 - [ ] STEP-54 触发财富旋转和大奖画面按参考视频
 
