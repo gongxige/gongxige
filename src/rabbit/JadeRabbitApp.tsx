@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import {
   BOARD_HEIGHTS,
   BONUS_MULTIPLIERS,
@@ -19,6 +20,7 @@ import { cellCenter, rectToPercent, type ArtLayout } from './artLayout.ts';
 import { markLocalArtFailed, preloadLocalArt, useLocalArt } from './localArt.ts';
 import { openingBoard } from './openingBoard.ts';
 import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
+import { COLUMN_DECEL_STARTS, COLUMN_DECEL_STARTS_FAST, COLUMN_START_DELAYS, MIN_COLUMN_GAP, MIN_COLUMN_GAP_FAST, ReelMotion } from './reelMotion.ts';
 
 type FreeSpins = { bet: number; remaining: number; played: number; totalWin: number; parentRoundId?: string } | null;
 type Session = { playerName: string; gameId: string; allowedBets?: number[]; credits: number; freeSpins: FreeSpins };
@@ -245,41 +247,149 @@ function RulesModal({ bet, bets, onClose }: { bet: number; bets: readonly number
   </div>;
 }
 
-/** 每列滚动带的符号数（一份）。滚动带放两份，循环正好移动一份的长度，接缝处看不出跳动。 */
-const ROLL_SEGMENT = 6;
-/** 滚动速度：每秒滚过的格数（极速时更快）。 */
-const ROLL_CELLS_PER_SECOND = 10;
-const ROLL_CELLS_PER_SECOND_FAST = 14;
+/** 每列的控制接口：开始转、停在结果上、立即结束。 */
+type ReelHandle = {
+  start(delaySeconds: number): void;
+  land(result: readonly Token[], quick?: boolean): Promise<void>;
+  snap(): void;
+};
 
-/** 转动开始时从真实轴带（玉兔模式用模式轴带）随机取一段，整局转动中不再改变，不会中途换图。 */
-function rollingSegments(inMode: boolean): Token[][] {
-  const strips = inMode ? MATH_MODE_STRIPS : MATH_STRIPS;
-  return strips.map((strip) => {
-    const start = Math.floor(Math.random() * strip.length);
-    return Array.from({ length: ROLL_SEGMENT }, (_, index) => strip[(start + index) % strip.length]);
-  });
-}
+const prefersReducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** 用 memo 包住：页面其它部分重渲染时（例如每列停下），没变的滚动带不跟着重渲染。 */
-const RollingColumn = memo(function RollingColumn({ rows, bet, segment, fast }: { rows: number; bet: number; segment: readonly Token[]; fast: boolean }) {
-  const cells = useMemo(() => [...segment, ...segment], [segment]);
-  // 滚动带高度 = 2 份 × 6 格，按列高的 rows 格换算；动画从 -50%（第二份顶端）匀速移到 0，正好一份，循环无缝。
-  const style = {
-    height: `${(cells.length / rows) * 100}%`,
-    animationDuration: `${segment.length / (fast ? ROLL_CELLS_PER_SECOND_FAST : ROLL_CELLS_PER_SECOND)}s`,
-  } as CSSProperties;
-  return <div className="rabbit-rolling-track" style={style}>{cells.map((entry, index) => <div className="rabbit-cell" key={index}><RabbitSymbol entry={entry} bet={bet} /></div>)}</div>;
+/**
+ * 阶段 15 / STEP-52：逐帧控制位置的卷轴（参数见 reelMotion.ts）。
+ * 只渲染视口里的 rows 格加上下各 1 格；位置跨过整数格时同步换一批格子，其余时间只改 transform。
+ * 滚动内容依次是：转动前的盘面（origin 起的 rows 格）、真实轴带、服务器结果（停点 stopK 起的 rows 格）。
+ * 滚动带一直在页面里（停着时隐藏，内容就是当前盘面）；下一局从上一局的停点接着转，起转时不新建元素。
+ */
+const SpinningReel = memo(function SpinningReel({ rows, bet, strip, rest, spinning, handleRef }: {
+  rows: number;
+  bet: number;
+  strip: readonly Token[];
+  rest: readonly Token[];
+  spinning: boolean;
+  handleRef: (handle: ReelHandle | null) => void;
+}) {
+  const [view, setView] = useState({ base: 0, spinId: 0, rev: 0, kickDelay: 0 });
+  const trackRef = useRef<HTMLDivElement>(null);
+  const motion = useMemo(() => new ReelMotion(rows), [rows]);
+  const latest = useRef({ rest, strip });
+  latest.current = { rest, strip };
+  const data = useRef({ base: 0, origin: 0, running: false, startColumn: rest, strip, result: null as readonly Token[] | null, stopK: null as number | null, reduced: false });
+  const frame = useRef(0);
+  const landing = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
+
+  const tokenAt = (k: number): Token => {
+    const d = data.current;
+    if (d.result && d.stopK !== null && k >= d.stopK && k < d.stopK + rows) return d.result[k - d.stopK];
+    // 停着时这一段跟着当前盘面走（例如进入玉兔模式换成空白盘面），起转时就和看到的一样。
+    if (k >= d.origin && k < d.origin + rows) return (d.running ? d.startColumn : rest)[k - d.origin] ?? EMPTY_TOKEN;
+    // 其余位置按真实轴带的顺序排；位置一局接一局往下走，所以每局滚过的是轴带上不同的一段。
+    const length = d.strip.length;
+    return d.strip[((k % length) + length) % length];
+  };
+
+  const placeTrack = (p: number, base: number) => {
+    if (trackRef.current) trackRef.current.style.transform = `translate3d(0, ${(-(p - base + 1) / (rows + 2)) * 100}%, 0)`;
+  };
+
+  const finish = () => {
+    cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    const d = data.current;
+    if (d.running && d.result && d.stopK !== null) {
+      // 停稳后结果成为下一局的起点；内容和停点一样，不需要重新渲染。
+      d.origin = d.stopK;
+      d.startColumn = d.result;
+    }
+    d.running = false;
+    d.result = null;
+    d.stopK = null;
+    const current = landing.current;
+    landing.current = null;
+    current?.resolve();
+  };
+
+  const tick = (nowMs: number) => {
+    const d = data.current;
+    const { p, phase } = motion.sample(nowMs / 1000);
+    if (d.result && d.stopK === null && motion.target !== null) {
+      // 停点定下来时结果还在视口上方，异步渲染就来得及。
+      d.stopK = motion.target;
+      setView((value) => ({ ...value, rev: value.rev + 1 }));
+    }
+    const base = Math.floor(p);
+    if (base !== d.base) {
+      d.base = base;
+      // 换格子和改位置必须在同一帧生效，否则会跳一格。
+      flushSync(() => setView((value) => ({ ...value, base })));
+    }
+    placeTrack(p, base);
+    if (phase === 'done' || phase === 'idle') { finish(); return; }
+    frame.current = requestAnimationFrame(tick);
+  };
+
+  useEffect(() => {
+    handleRef({
+      start(delaySeconds) {
+        finish();
+        const d = data.current;
+        d.startColumn = latest.current.rest;
+        d.strip = latest.current.strip;
+        d.running = true;
+        d.reduced = prefersReducedMotion();
+        setView((value) => ({ ...value, spinId: value.spinId + 1, kickDelay: delaySeconds }));
+        if (d.reduced) { motion.snap(); return; }
+        motion.start(performance.now() / 1000, delaySeconds, d.origin);
+        frame.current = requestAnimationFrame(tick);
+      },
+      land(result, quick = false) {
+        const d = data.current;
+        if (d.reduced || !motion.isActive) { motion.snap(); finish(); return Promise.resolve(); }
+        if (landing.current) {
+          if (quick) motion.requestStop(performance.now() / 1000, true);
+          return landing.current.promise;
+        }
+        d.result = result;
+        let resolve = () => {};
+        const promise = new Promise<void>((done) => { resolve = done; });
+        landing.current = { promise, resolve };
+        motion.requestStop(performance.now() / 1000, quick);
+        return promise;
+      },
+      snap() {
+        motion.snap();
+        const d = data.current;
+        // 出错时回到起点，显示当前盘面。
+        d.result = null;
+        d.stopK = null;
+        finish();
+        d.base = d.origin;
+        setView((value) => ({ ...value, base: d.origin }));
+        placeTrack(d.origin, d.origin);
+      },
+    });
+    return () => { handleRef(null); finish(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [motion]);
+
+  const slots = Array.from({ length: rows + 2 }, (_, index) => view.base - 1 + index);
+  return <>
+    <div className="rabbit-reel-track" ref={trackRef} aria-hidden={!spinning} style={{ height: `${((rows + 2) / rows) * 100}%`, transform: `translate3d(0, ${(-1 / (rows + 2)) * 100}%, 0)` }}>
+      {slots.map((k) => <div className="rabbit-cell" key={k} data-k={k}><RabbitSymbol entry={tokenAt(k)} bet={bet} /></div>)}
+    </div>
+    {spinning && <i className="rabbit-reel-kick" key={view.spinId} style={{ animationDelay: `${view.kickDelay}s` }} aria-hidden="true" />}
+  </>;
 });
 
 export default function JadeRabbitApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [board, setBoard] = useState<Board>(() => openingBoard());
   const [spinningReels, setSpinningReels] = useState<boolean[]>([false, false, false]);
-  // 刚停下的列：播放一次减速回弹。
-  const [landingReels, setLandingReels] = useState<boolean[]>([false, false, false]);
-  const [rollSegments, setRollSegments] = useState<Token[][]>(() => rollingSegments(false));
   const spinningRef = useRef<boolean[]>([false, false, false]);
-  const landingTimers = useRef<number[]>([]);
+  const reelHandles = useRef<(ReelHandle | null)[]>([null, null, null]);
+  // 每列登记控制接口的回调保持不变，卷轴组件不会因此重新挂载。
+  const reelHandleSetters = useMemo(() => BOARD_HEIGHTS.map((_, x) => (handle: ReelHandle | null) => { reelHandles.current[x] = handle; }), []);
   const [anticipating, setAnticipating] = useState(false);
   const [credits, setCredits] = useState(0);
   const [bet, setBet] = useState(0);
@@ -400,41 +510,53 @@ export default function JadeRabbitApp() {
     return () => window.clearTimeout(timer);
   }, [presentation, modeTotalWin]);
 
-  /** 停下指定的列；正在转的列停下时播放一次减速回弹。 */
-  function stopReels(columns: readonly number[]) {
-    const landed = columns.filter((column) => spinningRef.current[column]);
-    spinningRef.current = spinningRef.current.map((value, index) => (columns.includes(index) ? false : value));
+  /** 标记某列已经停稳：显示静态盘面。 */
+  function markReelStopped(column: number) {
+    if (!spinningRef.current[column]) return;
+    spinningRef.current = spinningRef.current.map((value, index) => (index === column ? false : value));
     setSpinningReels([...spinningRef.current]);
-    if (landed.length === 0) return;
-    setLandingReels((current) => current.map((value, index) => (landed.includes(index) ? true : value)));
-    const timer = window.setTimeout(() => setLandingReels((current) => current.map((value, index) => (landed.includes(index) ? false : value))), 420);
-    landingTimers.current.push(timer);
   }
 
-  useEffect(() => () => { landingTimers.current.forEach((timer) => window.clearTimeout(timer)); }, []);
+  /** 让一列减速停在服务器结果上；已经在停的列直接返回同一个 Promise。 */
+  function landReel(column: number, result: Board, quick = false): Promise<void> {
+    if (!spinningRef.current[column]) return Promise.resolve();
+    const handle = reelHandles.current[column];
+    if (!handle) { markReelStopped(column); return Promise.resolve(); }
+    return handle.land(result[column], quick).then(() => markReelStopped(column));
+  }
 
-  // 空闲时就把下一局的滚动带准备好（已经渲染在页面里，只是隐藏），开始转时不用再临时创建元素、解码图片。
-  useEffect(() => {
-    if (!busy) setRollSegments(rollingSegments(inMode));
-  }, [busy, inMode]);
+  /** 出错时：所有列立即停下，显示当前盘面。 */
+  function snapReels() {
+    reelHandles.current.forEach((handle) => handle?.snap());
+    BOARD_HEIGHTS.forEach((_, column) => markReelStopped(column));
+  }
 
+  /** 按参考视频的节奏依次停下三列（docs/JADE_RABBIT_MOTION.md 第一节）。 */
   async function animateResult(result: SpinResult, startedAt: number) {
-    if (stopRequested.current) return;
-    const totalWait = fast ? 420 : 690;
-    await wait(Math.max(0, totalWait - (performance.now() - startedAt)));
-    if (stopRequested.current) return;
-    setBoard(result.grid);
     if (result.mode === 'free') setModeBoardShown(true);
+    const decelStarts = fast ? COLUMN_DECEL_STARTS_FAST : COLUMN_DECEL_STARTS;
+    const gap = (fast ? MIN_COLUMN_GAP_FAST : MIN_COLUMN_GAP) * 1000;
     // 前两列已有 4 个牌匾时，最后一列「有可能」补足 5 个就亮期待蓝光（不提前暴露最后一列的结果）。
     const earlyBonusCount = result.grid.slice(0, 2).flat().filter((entry) => entry.symbolId === 'BONUS_PLATE').length;
     const expectBonus = result.mode === 'paid' && earlyBonusCount === 4;
-    for (let column = 0; column < BOARD_HEIGHTS.length; column += 1) {
-      if (column === 2 && expectBonus) { setAnticipating(true); await wait(fast ? 260 : 620); }
-      if (stopRequested.current) return;
-      stopReels([column]);
-      if (column === 2) setAnticipating(false);
-      if (column < 2) await wait(fast ? 130 : 220);
+    const lands: Promise<void>[] = [];
+    let previous = -Infinity;
+    for (let column = 0; column < BOARD_HEIGHTS.length && !stopRequested.current; column += 1) {
+      let at = Math.max(startedAt + decelStarts[column] * 1000, previous + gap);
+      if (column === 2 && expectBonus) {
+        await wait(Math.max(0, at - performance.now()));
+        if (stopRequested.current) break;
+        setAnticipating(true);
+        at += fast ? 400 : 900;
+      }
+      await wait(Math.max(0, at - performance.now()));
+      if (stopRequested.current) break;
+      previous = performance.now();
+      lands.push(landReel(column, result.grid));
     }
+    // 「立即停止」时剩下的列一起快速停下；已经在停的列不受影响。
+    await Promise.all([...lands, ...BOARD_HEIGHTS.map((_, column) => landReel(column, result.grid, stopRequested.current))]);
+    setAnticipating(false);
   }
 
   async function spin(kind: SpinKind = 'manual') {
@@ -443,7 +565,7 @@ export default function JadeRabbitApp() {
       // 立即停止：结果还没回来时只记下请求，等结果到了直接停在新盘面上，不会先停在上一局的盘面。
       stopRequested.current = true;
       const arrived = pendingResult.current;
-      if (arrived) { setBoard(arrived.grid); if (arrived.mode === 'free') setModeBoardShown(true); stopReels([0, 1, 2]); setAnticipating(false); }
+      if (arrived) { setBoard(arrived.grid); if (arrived.mode === 'free') setModeBoardShown(true); BOARD_HEIGHTS.forEach((_, column) => { void landReel(column, arrived.grid, true); }); }
       setMessage(arrived ? '已停止' : '立即停止，等待服务器结算…');
       return;
     }
@@ -461,14 +583,16 @@ export default function JadeRabbitApp() {
     if (!isFree) setCredits((value) => value - bet);
     spinningRef.current = [true, true, true];
     setSpinningReels([true, true, true]);
+    reelHandles.current.forEach((handle, column) => handle?.start(COLUMN_START_DELAYS[column]));
     const startedAt = performance.now();
     try {
       // 告诉服务器这一局是财富旋转还是付费局；状态对不上时服务器返回 409，不会把财富旋转的重试当成付费局扣款。
       const result = await api<SpinResult>('/api/spin', { token, bet, mode: isFree ? 'free' : 'paid', ...(isFree && freeSpins?.parentRoundId ? { parentRoundId: freeSpins.parentRoundId } : {}) });
       if (result.gameId !== 'jade-rabbit') throw new Error('服务器返回了不匹配的游戏盘面。');
       pendingResult.current = result;
+      // 静态盘面在转动时是隐藏的，先换成结果，停稳后直接显示。
+      setBoard(result.grid);
       await animateResult(result, startedAt);
-      stopReels([0, 1, 2]); setAnticipating(false); setBoard(result.grid);
       if (result.mode === 'paid') mainBoardRef.current = result.grid;
       if (result.mode === 'free') setModeBoardShown(true);
       setLastRoundId(result.roundId);
@@ -498,7 +622,7 @@ export default function JadeRabbitApp() {
       else setMessage(isFree ? '本次财富旋转未凑够 5 个牌匾' : '本局未中奖，再来一次');
       if (result.capped) { setMessage('本轮已达到 5000 倍封顶。'); autoRef.current = 0; setAutoRemaining(null); }
     } catch (e) {
-      stopReels([0, 1, 2]); setAnticipating(false);
+      snapReels(); setAnticipating(false);
       const err = e as Error & { status?: number };
       setMessage(err.status === 402 ? '余额不足，请回大厅充值' : err.message);
       // 出错时停止自动旋转，并按服务器的真实状态同步余额和玉兔模式。
@@ -595,8 +719,8 @@ export default function JadeRabbitApp() {
     : board;
   const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
 
-  const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${landingReels[x] && !spinningReels[x] ? 'is-landing' : ''} ${fast ? 'is-fast' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
-    <RollingColumn rows={BOARD_HEIGHTS[x]} bet={bet} segment={rollSegments[x]} fast={fast} />
+  const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
+    <SpinningReel rows={BOARD_HEIGHTS[x]} bet={bet} strip={(inMode ? MATH_MODE_STRIPS : MATH_STRIPS)[x]} rest={column} spinning={spinningReels[x]} handleRef={reelHandleSetters[x]} />
     {column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
   </div>;
   const topBannerText = modeLook ? infoItems[0] : infoItems[tickerIndex];

@@ -393,7 +393,7 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-modal-backdrop { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 4%; background: #050e14cc; }.rabbit-modal { width: min(92%, 560px); max-height: 92%; overflow: auto; padding: 3.5cqw; border: .35cqw solid #eac86b; border-radius: 1.5cqw; background: linear-gradient(145deg, #123f4b, #0b202f); color: #ffeec2; box-shadow: 0 1cqw 3cqw #000b; }.rabbit-modal-heading { display: flex; align-items: center; justify-content: space-between; color: #ffe184; font: 900 3.4cqw/1 "KaiTi", serif; }.rabbit-modal-heading button { width: 5cqw; height: 5cqw; border: 0; border-radius: 50%; background: #8f2734; color: #fff1ba; font-size: 4cqw; cursor: pointer; }.rabbit-modal p, .rabbit-modal li { font-size: 1.8cqw; line-height: 1.55; }.rabbit-modal ul { padding-left: 4cqw; }.rabbit-paytable { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1cqw; }.rabbit-paytable > div { display: grid; justify-items: center; padding: .5cqw; border: .15cqw solid #ffffff24; border-radius: .7cqw; background: #06192366; }.rabbit-paytable .rabbit-symbol { width: 12cqw; height: 8cqw; }.rabbit-paytable span { font-size: 1.45cqw; }.rabbit-paytable strong { color: #ffd86a; font: 900 1.8cqw Georgia, serif; }.rabbit-primary { display: block; min-width: 18cqw; min-height: 6cqw; margin: 2cqw auto 0; border: .25cqw solid #ffefac; border-radius: 1cqw; background: linear-gradient(#f9d476, #b96c22); color: #fff9d7; font-weight: 900; cursor: pointer; }
 @media (max-width: 520px) { .rabbit-stage { width: 100vw; height: 100dvh; min-height: 0; }.rabbit-home, .rabbit-info-button { width: 9cqw; height: 9cqw; }.rabbit-controls { gap: .55cqw; }.rabbit-auto span, .rabbit-fast, .rabbit-max { font-size: 2.2cqw; }.rabbit-auto select { max-width: 14cqw; }.rabbit-modal p, .rabbit-modal li { font-size: 2.6cqw; }.rabbit-paytable { grid-template-columns: repeat(4, 1fr); }.rabbit-paytable span { font-size: 2cqw; }.rabbit-paytable strong { font-size: 2.4cqw; } }
 @media (max-height: 520px) and (orientation: landscape) { .rabbit-stage { width: 100vw; height: 100dvh; min-height: 0; }.rabbit-header { height: 15%; }.rabbit-roof { left: 3%; right: auto; top: 12%; width: 27%; height: 32%; }.rabbit-title b { font-size: 3.4cqw; }.rabbit-title small { font-size: 1.15cqw; }.rabbit-home, .rabbit-info-button { width: 5.5cqw; height: 5.5cqw; font-size: 3cqw; }.rabbit-couplet { top: 24%; height: 38%; width: 4.2%; font-size: 2.2cqw; }.rabbit-couplet-left { left: 1%; }.rabbit-couplet-right { right: 1%; }.rabbit-machine { left: 20%; right: 20%; top: 17%; height: 58%; }.rabbit-info-strip { left: 27%; right: 27%; top: 76%; height: 8%; font-size: 1.7cqw; }.rabbit-mode-badge { top: 14%; font-size: 1.7cqw; }.rabbit-bottom { height: 22%; padding: .6cqw 2%; }.rabbit-stats { position: absolute; left: 2%; top: 10%; width: 23%; height: 78%; }.rabbit-stats strong { font-size: 2.2cqw; }.rabbit-controls { margin-left: 25%; height: 64%; }.rabbit-message { position: absolute; left: 25%; right: 2%; bottom: 0; height: 22%; font-size: 1.3cqw; }.rabbit-demo-note { font-size: .9cqw; }.rabbit-modal p, .rabbit-modal li { font-size: 1.5cqw; } }
-@media (prefers-reduced-motion: reduce) { .rabbit-mascot, .rabbit-reel-column.is-spinning .rabbit-rolling-track, .rabbit-reel-column.is-anticipating, .rabbit-cell.is-winning, .rabbit-line-layer polyline { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rabbit-mascot, .rabbit-reel-column.is-anticipating, .rabbit-cell.is-winning, .rabbit-line-layer polyline { animation: none; } }
 
 .rabbit-cell.is-bonus-collect { z-index: 8; animation: rabbit-bonus-flash .55s ease-in-out infinite alternate; filter: drop-shadow(0 0 1.6cqw #fff3a0) brightness(1.35); }
 @keyframes rabbit-bonus-flash { to { transform: scale(1.12) rotate(2deg); filter: drop-shadow(0 0 2.8cqw #ffd64c) brightness(1.5); } }
@@ -501,30 +501,26 @@ body:has(.rabbit-shell) { overflow: hidden; background: #120b12; }
 .rabbit-payline-grid { margin-bottom: 1.2cqw; }
 .rabbit-primary { margin-top: 1.2cqw; }
 @media (max-width: 520px) { .rabbit-paytable small { font-size: 2.2cqw; } }
-/* STEP-49：转动更流畅 */
-/* 滚动带放两份同样的符号，固定在列顶，从 -50% 匀速移到 0（正好一份），循环无缝；用 GPU 合成的位移，不触发重排 */
-.rabbit-rolling-track .rabbit-symbol { filter: none; }
+/* STEP-52：卷轴按参考视频逐帧控制位置（src/rabbit/reelMotion.ts），这里只负责摆放 */
+/* 滚动带只有视口里的格子加上下各 1 格，固定在列顶，位置由脚本每帧写进 transform（GPU 合成，不触发重排） */
 .rabbit-reel-column.is-spinning { contain: layout paint; }
-.rabbit-rolling-track { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; gap: 0; will-change: transform; transform: translate3d(0, -50%, 0); backface-visibility: hidden; }
-.rabbit-reel-column.is-spinning .rabbit-rolling-track { animation-name: rabbit-roll-loop; animation-timing-function: linear; animation-iteration-count: infinite; }
-@keyframes rabbit-roll-loop { from { transform: translate3d(0, -50%, 0); } to { transform: translate3d(0, 0, 0); } }
-.rabbit-rolling-track .rabbit-cell { flex: none; width: 100%; height: calc(100% / 12); }
-.rabbit-rolling-track .rabbit-cell > .rabbit-symbol { position: absolute; inset: 4%; width: 92%; height: 92%; }
-.rabbit-rolling-track .rabbit-cell > img.rabbit-symbol, .rabbit-rolling-track .rabbit-cell > .rabbit-plate-image { inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
-/* 停轴：从上方带一点速度落下，略过头再回弹到位 */
-.rabbit-reel-column.is-landing > .rabbit-cell { animation: rabbit-land .38s cubic-bezier(.22, 1.3, .36, 1) both; }
-.rabbit-reel-column.is-landing.is-fast > .rabbit-cell { animation-duration: .24s; }
-@keyframes rabbit-land { from { transform: translate3d(0, -26%, 0); } to { transform: translate3d(0, 0, 0); } }
+.rabbit-reel-column { gap: 0; }
+.rabbit-reel-track { position: absolute; top: 0; left: 0; right: 0; z-index: 1; display: flex; flex-direction: column; gap: 0; will-change: transform; backface-visibility: hidden; }
+.rabbit-reel-track .rabbit-cell { flex: 1 1 0; width: 100%; min-height: 0; }
+.rabbit-reel-track .rabbit-symbol { filter: none; }
+.rabbit-reel-track .rabbit-cell > .rabbit-symbol { position: absolute; inset: 4%; width: 92%; height: 92%; }
+.rabbit-reel-track .rabbit-cell > img.rabbit-symbol, .rabbit-reel-track .rabbit-cell > .rabbit-plate-image { inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+.rabbit-reel-column.is-spinning > .rabbit-cell { visibility: hidden; }
+.rabbit-reel-column:not(.is-spinning) > .rabbit-reel-track { visibility: hidden; }
+/* 起转时列框亮一圈青蓝色光，约 0.3 秒淡掉（参考视频测量值），每列按自己的起转时间延后 */
+.rabbit-reel-kick { position: absolute; inset: 0; z-index: 6; pointer-events: none; border-radius: inherit; border: .35cqw solid #8af0ff; box-shadow: inset 0 0 2.2cqw .5cqw #45d4ffcc, 0 0 1.6cqw #45d4ff; opacity: 0; animation: rabbit-reel-kick .36s ease-out both; }
+@keyframes rabbit-reel-kick { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
 /* 期待蓝光：只改透明度，不再逐帧重画阴影 */
 .rabbit-reel-column.is-anticipating { animation: none; box-shadow: none; }
 .rabbit-reel-column.is-anticipating::before { content: ''; position: absolute; inset: 0; z-index: 6; pointer-events: none; border: .3cqw solid #7fe3ff; border-radius: inherit; box-shadow: inset 0 0 2.4cqw .6cqw #45cfff; animation: rabbit-blue-glow .52s ease-in-out infinite alternate; }
 @keyframes rabbit-blue-glow { from { opacity: .45; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .rabbit-reel-column.is-landing > .rabbit-cell, .rabbit-reel-column.is-anticipating::before { animation: none; } }
-/* 滚动带和停下的格子都一直在页面里：转动时显示滚动带、隐藏格子，停下时反过来；开始和停下都不再新建元素 */
-.rabbit-reel-column:not(.is-spinning) > .rabbit-rolling-track { visibility: hidden; animation: none; }
-.rabbit-reel-column.is-spinning > .rabbit-cell { visibility: hidden; }
-/* 减少动态效果：转动时滚动带静止（停在 -50%，正好显示一份完整符号），停轴回弹和蓝光也不动；写在上面的滚动规则之后才能覆盖它 */
-@media (prefers-reduced-motion: reduce) { .rabbit-reel-column.is-spinning .rabbit-rolling-track { animation: none; } }
+/* 减少动态效果：卷轴不滚动（脚本不启动），起转蓝光和期待蓝光也不动 */
+@media (prefers-reduced-motion: reduce) { .rabbit-reel-kick { display: none; } .rabbit-reel-column.is-anticipating::before { animation: none; } }
 /* STEP-51：规则与赔付表，结构参考参考游戏规则页（分节、居中标题、赔付表百搭单独一行） */
 .rabbit-rules { width: min(94%, 600px); background: #23242c; border-color: #6b5a3a; color: #d9dae0; }
 .rabbit-rules .rabbit-modal-heading { justify-content: center; position: relative; color: #fff; }
