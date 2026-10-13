@@ -17,6 +17,7 @@ import {
   type Token,
 } from './engine/index.ts';
 import { cellCenter, rectToPercent, type ArtLayout } from './artLayout.ts';
+import { lineBadges, WIN_TIMING, winningCells } from './winDisplay.ts';
 import { markLocalArtFailed, preloadLocalArt, useLocalArt } from './localArt.ts';
 import { openingBoard } from './openingBoard.ts';
 import { markLocalSymbolFailed, preloadLocalSymbols, useLocalSymbolSrc } from './localSymbolImages.ts';
@@ -310,6 +311,20 @@ const SpinningReel = memo(function SpinningReel({ rows, bet, strip, rest, spinni
     current?.resolve();
   };
 
+  /** 直接停到结果上（标签页在后台、requestAnimationFrame 不走时用）。 */
+  const jumpToResult = () => {
+    const d = data.current;
+    if (!d.result) return;
+    motion.snap();
+    // 停点放在当前视口下方够远的地方（看不见，也不会和起点那段重叠）。
+    d.stopK = Math.floor(d.base) - rows - 2;
+    const base = d.stopK;
+    d.base = base;
+    setView((value) => ({ ...value, base }));
+    placeTrack(base, base);
+    finish();
+  };
+
   const tick = (nowMs: number) => {
     const d = data.current;
     const { p, phase } = motion.sample(nowMs / 1000);
@@ -354,6 +369,7 @@ const SpinningReel = memo(function SpinningReel({ rows, bet, strip, rest, spinni
         let resolve = () => {};
         const promise = new Promise<void>((done) => { resolve = done; });
         landing.current = { promise, resolve };
+        if (document.hidden) { jumpToResult(); return promise; }
         motion.requestStop(performance.now() / 1000, quick);
         return promise;
       },
@@ -369,7 +385,10 @@ const SpinningReel = memo(function SpinningReel({ rows, bet, strip, rest, spinni
         placeTrack(d.origin, d.origin);
       },
     });
-    return () => { handleRef(null); finish(); };
+    // 停轴途中切到后台：后台里 requestAnimationFrame 会暂停，直接停到结果上，自动旋转和财富旋转不会卡住。
+    const onHidden = () => { if (document.hidden && landing.current) jumpToResult(); };
+    document.addEventListener('visibilitychange', onHidden);
+    return () => { handleRef(null); finish(); document.removeEventListener('visibilitychange', onHidden); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [motion]);
 
@@ -402,11 +421,9 @@ export default function JadeRabbitApp() {
   const [autoCount, setAutoCount] = useState('10');
   const [fast, setFast] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [activeLine, setActiveLine] = useState<number | null>(null);
   const [tickerIndex, setTickerIndex] = useState(0);
   const [presentation, setPresentation] = useState<RabbitPresentation>('idle');
   const [modeTotalWin, setModeTotalWin] = useState(0);
-  const [modeSpinNumber, setModeSpinNumber] = useState(0);
   // 玉兔模式里已经有本局财富旋转的盘面（还没有时显示空白盘面）。
   const [modeBoardShown, setModeBoardShown] = useState(false);
   // 财富旋转请求失败后暂停自动接着转，等玩家点按钮继续。
@@ -437,10 +454,10 @@ export default function JadeRabbitApp() {
       ? 'mode'
       : busy ? 'spin' : win > 0 ? 'win' : 'idle';
   const resultLineWins = useRef<SpinResult['lineWins']>([]);
-  const activeWinCells = useMemo(() => {
-    const line = resultLineWins.current?.find((entry) => entry.lineNumber === activeLine);
-    return new Set((line?.coordinates ?? []).map(({ x, y }) => `${x}-${y}`));
-  }, [activeLine, board]);
+  // STEP-53：本局所有中奖线同时显示（不再逐条轮播）；转动中、进入玉兔模式画面后不显示。
+  const shownLines = !busy && !presentation.startsWith('mode-') ? resultLineWins.current ?? [] : [];
+  const activeWinCells = winningCells(shownLines);
+  const shownLineNumbers = new Set(shownLines.map((line) => line.lineNumber));
   const canAdjustBet = !busy && !inMode && autoRef.current === 0;
 
   useEffect(() => { preloadLocalSymbols(); preloadLocalArt(); }, []);
@@ -459,18 +476,8 @@ export default function JadeRabbitApp() {
   }, []);
 
   useEffect(() => {
-    const lineWins = resultLineWins.current ?? [];
-    // 进入玉兔模式后不再轮播触发局的中奖线。
-    if (busy || lineWins.length === 0 || presentation.startsWith('mode-')) { setActiveLine(null); return; }
-    let index = 0;
-    setActiveLine(lineWins[0]?.lineNumber ?? null);
-    const timer = window.setInterval(() => { index = (index + 1) % lineWins.length; setActiveLine(lineWins[index]?.lineNumber ?? null); }, 1450);
-    return () => window.clearInterval(timer);
-  }, [busy, win, board, presentation]);
-
-  useEffect(() => {
     if (presentation !== 'bonus-collect') return;
-    const timer = window.setTimeout(() => setPresentation(bonusCollectNext.current), 1_850);
+    const timer = window.setTimeout(() => setPresentation(bonusCollectNext.current), 1_400);
     return () => window.clearTimeout(timer);
   }, [presentation]);
 
@@ -488,7 +495,7 @@ export default function JadeRabbitApp() {
 
   useEffect(() => {
     if (presentation === 'mode-collect') {
-      const timer = window.setTimeout(() => setPresentation(freeSpins?.remaining ? 'mode-spin' : 'mode-finale'), 1_300);
+      const timer = window.setTimeout(() => setPresentation(freeSpins?.remaining ? 'mode-spin' : 'mode-finale'), 1_400);
       return () => window.clearTimeout(timer);
     }
     if (presentation !== 'mode-finale') return;
@@ -576,7 +583,7 @@ export default function JadeRabbitApp() {
     if (kind === 'auto' && autoRef.current > 0) { autoRef.current -= 1; setAutoRemaining(autoRef.current); }
     if (kind === 'manual') setModePaused(false);
     pendingResult.current = null;
-    busyRef.current = true; stopRequested.current = false; setBusy(true); setWin(0); setError(''); setActiveLine(null);
+    busyRef.current = true; stopRequested.current = false; setBusy(true); setWin(0); setError('');
     resultLineWins.current = [];
     resultBonusWins.current = [];
     setMessage(isFree ? `财富旋转 · 剩余 ${freeSpins!.remaining} 次` : '旋转中…');
@@ -599,7 +606,6 @@ export default function JadeRabbitApp() {
       if (result.credits !== null) setCredits(result.credits);
       setBet(result.bet); setWin(result.payout); setFreeSpins(result.freeSpins); resultLineWins.current = result.lineWins ?? [];
       resultBonusWins.current = result.bonusWins ?? [];
-      if (result.mode === 'free' && result.modeIndex !== undefined) setModeSpinNumber(result.modeIndex + 1);
       if (result.freeSpinsFinished) setModeTotalWin(result.freeSpinsFinished.totalWin);
       if (result.bonusWins && result.bonusWins.length >= 5 && result.mode !== 'free') {
         bonusCollectNext.current = result.triggered ? 'mode-trigger' : 'idle';
@@ -659,7 +665,7 @@ export default function JadeRabbitApp() {
     // 只在画面空闲时计时；牌匾收集等叠加动画结束回到 idle 后会重新计时，不会卡住。
     if (busy || rules || error || !session || inMode || presentation !== 'idle' || autoRef.current <= 0 || autoRemaining === 0) return;
     if (credits < bet) { autoRef.current = 0; setAutoRemaining(null); setMessage('余额不足，自动旋转已停止'); return; }
-    const timer = window.setTimeout(() => { void spinRef.current('auto'); }, win > 0 ? 1000 : 420);
+    const timer = window.setTimeout(() => { void spinRef.current('auto'); }, win > 0 ? WIN_TIMING.autoNextMs : 420);
     return () => window.clearTimeout(timer);
   }, [busy, rules, error, session, inMode, presentation, autoRemaining, credits, bet, win, board]);
 
@@ -707,9 +713,11 @@ export default function JadeRabbitApp() {
   const modeLook = inMode || presentation.startsWith('mode-');
   const artBackground = modeLook ? localArt.bgMode ?? localArt.bgMain : localArt.bgMain;
   // 中奖线按服务器返回的 lineWins 坐标画，不按线号查本地表，保证和结算一致。
-  const activeLineCoordinates = resultLineWins.current?.find((entry) => entry.lineNumber === activeLine)?.coordinates ?? null;
-  const artLinePath = layout && activeLineCoordinates ? activeLineCoordinates.map(({ x, y }) => { const point = cellCenter(layout, x, y, BOARD_HEIGHTS[x]); return `${point.x},${point.y}`; }).join(' ') : '';
-  const linePath = activeLineCoordinates ? activeLineCoordinates.map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' ') : '';
+  const artLinePaths = layout ? shownLines.map((line) => line.coordinates.map(({ x, y }) => { const point = cellCenter(layout, x, y, BOARD_HEIGHTS[x]); return `${point.x},${point.y}`; }).join(' ')) : [];
+  const linePaths = shownLines.map((line) => line.coordinates.map(({ x, y }) => `${((x + 0.5) / 3) * 300},${((y + 0.5) / BOARD_HEIGHTS[x]) * 100}`).join(' '));
+  // 每条中奖线画两层：外面一层橙色光晕，里面一层亮黄色线芯。
+  const linePolylines = (paths: string[]) => paths.map((points, index) => <g key={`${shownLines[index]?.lineNumber}-${index}`}><polyline className="rabbit-line-halo" points={points} pathLength={1} /><polyline className="rabbit-line-core" points={points} pathLength={1} /></g>);
+  const badges = layout ? lineBadges(layout, shownLines) : [];
   const infoItems = ['5 个奖金牌匾即可赢奖！', '随机触发 8 次财富旋转！', '赢取高达 5000 倍大奖！'];
   const betIndex = bets.indexOf(bet);
   const modeBlankBoard = board.map((column) => column.map(() => EMPTY_TOKEN)) as unknown as Board;
@@ -718,10 +726,17 @@ export default function JadeRabbitApp() {
     ? modeBlankBoard
     : board;
   const activeBonusCells = new Set((resultBonusWins.current ?? []).map((entry) => `${entry.coordinates.x}-${entry.coordinates.y}`));
+  // 满 5 个牌匾的收集画面：牌匾发金光，其余格子压暗（主游戏和玉兔模式一样）。
+  const collecting = presentation === 'bonus-collect' || presentation === 'mode-collect';
 
   const reelColumn = (column: readonly Token[], x: number) => <div className={`rabbit-reel-column rows-${BOARD_HEIGHTS[x]} ${spinningReels[x] ? 'is-spinning' : ''} ${x === 2 && anticipating ? 'is-anticipating' : ''}`} key={x}>
     <SpinningReel rows={BOARD_HEIGHTS[x]} bet={bet} strip={(inMode ? MATH_MODE_STRIPS : MATH_STRIPS)[x]} rest={column} spinning={spinningReels[x]} handleRef={reelHandleSetters[x]} />
-    {column.map((entry, y) => <div className={`rabbit-cell ${activeWinCells.has(`${x}-${y}`) ? 'is-winning' : activeLine !== null ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${activeBonusCells.has(`${x}-${y}`) && presentation === 'bonus-collect' ? 'is-bonus-collect' : ''}`} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>)}
+    {column.map((entry, y) => {
+      const key = `${x}-${y}`;
+      const bonusLit = collecting && activeBonusCells.has(key);
+      const dim = !bonusLit && !activeWinCells.has(key) && (shownLines.length > 0 || collecting);
+      return <div className={`rabbit-cell ${activeWinCells.has(key) ? 'is-winning' : ''} ${dim ? 'is-dim' : ''} ${entry.symbolId === 'BONUS_PLATE' ? 'is-bonus' : ''} ${bonusLit ? 'is-bonus-collect' : ''}`} style={{ '--win-col': x } as CSSProperties} key={`${entry.stackGroupId}-${y}`}><RabbitSymbol entry={entry} bet={bet} /></div>;
+    })}
   </div>;
   const topBannerText = modeLook ? infoItems[0] : infoItems[tickerIndex];
   const bottomBarText = win > 0 && !busy ? `赢得 ${fmt(win)}` : modeLook ? (inMode ? `玉兔模式！剩余 ${freeSpins!.remaining} 次` : '玉兔模式！') : infoItems[(tickerIndex + 1) % infoItems.length];
@@ -738,7 +753,8 @@ export default function JadeRabbitApp() {
         <div className="rabbit-art-mascot" style={rectToPercent(layout.mascotArea, layout)}><RabbitMascot mood={mood} /></div>
         <div className="rabbit-art-banner" style={rectToPercent(layout.topBanner, layout)} role="status"><span>{topBannerText}</span></div>
         {displayBoard.map((column, x) => <div className="rabbit-art-reel" style={rectToPercent(layout.reels[x], layout)} key={x}>{reelColumn(column, x)}</div>)}
-        <svg className="rabbit-line-layer" viewBox={`0 0 ${layout.imageSize.width} ${layout.imageSize.height}`} preserveAspectRatio="none" aria-hidden="true">{artLinePath && <polyline points={artLinePath} />}</svg>
+        <svg className="rabbit-line-layer" viewBox={`0 0 ${layout.imageSize.width} ${layout.imageSize.height}`} preserveAspectRatio="none" aria-hidden="true">{linePolylines(artLinePaths)}</svg>
+        {badges.map((badge) => <span className={`rabbit-line-badge is-${badge.side}`} style={{ left: `${(badge.x / layout.imageSize.width) * 100}%`, top: `${(badge.y / layout.imageSize.height) * 100}%` }} key={`${badge.side}-${badge.lineNumber}`}>{badge.lineNumber}</span>)}
         <div className="rabbit-art-bar" style={rectToPercent(layout.bottomBar, layout)} role="status"><span>{bottomBarText}</span></div>
       </div> : <>
       <div className="rabbit-roof" aria-hidden="true">
@@ -748,18 +764,16 @@ export default function JadeRabbitApp() {
       <aside className="rabbit-couplet rabbit-couplet-left" aria-label="左侧对联">恭<br />喜</aside>
       <aside className="rabbit-couplet rabbit-couplet-right" aria-label="右侧对联">发<br />财</aside>
       <div className="rabbit-machine">
-        <div className="rabbit-line-rail left">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
+        <div className="rabbit-line-rail left">{Array.from({ length: 10 }, (_, index) => <span key={index} className={shownLineNumbers.has(index + 1) ? 'is-active' : ''}>{index + 1}</span>)}</div>
         <div className="rabbit-reels" aria-label="3-4-3 服务器盘面">
           {displayBoard.map((column, x) => reelColumn(column, x))}
-          <svg className="rabbit-line-layer" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">{linePath && <polyline points={linePath} />}</svg>
+          <svg className="rabbit-line-layer" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">{linePolylines(linePaths)}</svg>
         </div>
-        <div className="rabbit-line-rail right">{Array.from({ length: 10 }, (_, index) => <span key={index} className={activeLine === index + 1 ? 'is-active' : ''}>{index + 1}</span>)}</div>
+        <div className="rabbit-line-rail right">{Array.from({ length: 10 }, (_, index) => <span key={index} className={shownLineNumbers.has(index + 1) ? 'is-active' : ''}>{index + 1}</span>)}</div>
       </div>
       </>}
-      {presentation === 'bonus-collect' && <div className="rabbit-bonus-callout" role="status"><b>奖金牌一起发光</b><strong>{fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</strong></div>}
       {presentation === 'mode-trigger' && <div className="rabbit-mode-overlay rabbit-mode-trigger" role="status"><b>玉兔送财</b><span>触发财富旋转</span></div>}
       {presentation === 'mode-intro' && <div className="rabbit-mode-overlay rabbit-mode-intro" role="status"><b>8 次财富旋转</b><span>好运已经起航</span></div>}
-      {presentation === 'mode-collect' && <div className="rabbit-mode-overlay rabbit-mode-collect" role="status"><b>第 {modeSpinNumber} 次收集</b><span>赢得 {fmt((resultBonusWins.current ?? []).reduce((sum, entry) => sum + entry.value, 0))}</span></div>}
       {presentation === 'mode-finale' && <div className="rabbit-mode-overlay rabbit-mode-finale" role="status"><b>大奖</b><span>金币雨 · {fmt(modeTotalWin)}</span><i>{Array.from({ length: 18 }, (_, index) => <em key={index}>◆</em>)}</i></div>}
       {presentation === 'mode-total' && <div className="rabbit-mode-overlay rabbit-mode-total" role="status"><b>本轮共赢 {fmt(modeTotalWin)}</b><span>财富旋转结束（含触发局）</span></div>}
       {!layout && <div className="rabbit-info-strip" role="status"><span className="info-seal">玉</span><span>{win > 0 && !busy ? `赢得 ${fmt(win)}` : infoItems[tickerIndex]}</span><span className="info-seal">兔</span></div>}
