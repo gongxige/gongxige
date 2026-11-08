@@ -171,7 +171,8 @@ async function adminApi(req, res, url) {
   if (req.method === 'GET' && path === '/overview') {
     // Per-game numbers come from the game server's round records (this operator's latest 500 rounds, today only).
     const totals = overview(db);
-    const { status, body } = await operatorRounds();
+    // If the game server is down, still return the platform's own totals (gamesAvailable: false).
+    const { status, body } = await operatorRounds().catch(() => ({ status: 0, body: null }));
     const byGame = Object.fromEntries(Object.entries(PLATFORM_GAMES).map(([gameId, title]) => [gameId, { title, rounds: 0, bets: 0, wins: 0 }]));
     if (status === 200) for (const round of body.records) {
       if (round.at < totals.since) continue;

@@ -1,5 +1,15 @@
 # 开发日志
 
+## 2026-11-06 · 维护：修复构建类型声明和后台概览测试
+
+**做了什么**：
+1. 全新 checkout 执行 `npm ci` 后 `npm run build` 报 TS7016（找不到 `react` 的类型声明）及连带的 TS7006。原因是 `package.json` 没有声明 React 类型包，之前只是本机碰巧装过。新增固定版本 devDependencies `@types/react@19.3.0`、`@types/react-dom@19.3.0`（与 React 19.3.0 对应，不带 `^`），没有其他类型错误需要改。
+2. `src/platform/admin.test.ts`「概览」用例失败（`players` 为 `undefined`）。排查结论：不是接口缺字段，也不是测试超前于阶段 12 计划（该用例自阶段 7 起就存在，阶段 12 不涉及概览）。`/api/admin/overview` 会向游戏服务器取按游戏统计，测试里没有启动游戏服务器，`fetch` 抛出异常，整个接口返回 `400 {"error":"fetch failed"}`。以前能通过，多半是本机 8787 端口正好开着游戏服务器。修复：`platform-server.mjs` 中对 `operatorRounds()` 的异常兜底，游戏服务器连不上时照常返回平台自己的数字并带 `gamesAvailable: false`；后台页面原本就按这个字段提示“游戏服务器暂时连不上，显示为 0”。
+
+**怎么验证**：`npm run build` 通过；`npm test` 109/109；`npm run rtp` 正常运行（100 万局 RTP 97.45%）；手动在没有游戏服务器的情况下启动平台，修复前 `/api/admin/overview` 返回 400，修复后返回包含 `players` 的完整概览。
+
+**遗留问题**：无；阶段 12（STEP-45、STEP-46）尚未开工。
+
 ## 2026-10-12 · STEP-44 端到端检查和收尾（第 1 次尝试）
 
 **做了什么**：`scripts/platform-check.mjs` 增加玉兔送财完整平台流程：注册、充值申请、后台通过、50 个付费父局及固定触发的玉兔模式子局、提现申请、后台通过和最终对账；检查进程通过 `RABBIT_TRIGGER_ROLL=0` 确保模式覆盖，不改变生产随机逻辑。为避免麻将随机低回报时耗尽测试积分，麻将段也改为先走一次模拟充值审核。README 增加玉兔送财与 RTP 命令说明，阶段 11 标记完成。
